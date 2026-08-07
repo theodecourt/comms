@@ -22,13 +22,25 @@ tell application "Ghostty"
 end tell
 """
 
-def _osascript(script: str) -> str:
+def _osascript(script: str) -> tuple:
+    """Run an AppleScript and report whether it actually worked.
+
+    Returns (ok, output). `ok` is False when the process could not even be
+    started (osascript missing, etc.) or when it exited non-zero — a
+    malformed script, Ghostty not running, or Automation permission denied
+    all surface as a non-zero exit here. The *exception* is still swallowed
+    (this module never raises), but the *fact* of failure is not: callers
+    such as spawn() need it to avoid reporting success for a tab that was
+    never opened.
+    """
     try:
         r = subprocess.run(["osascript", "-e", script],
                            capture_output=True, text=True, timeout=15)
-        return r.stdout.strip()
     except (OSError, subprocess.SubprocessError):
-        return ""
+        return False, ""
+    if r.returncode != 0:
+        return False, ""
+    return True, r.stdout.strip()
 
 def _esc(s: str) -> str:
     # Backslashes MUST be escaped before quotes. Doing it the other way
@@ -37,8 +49,11 @@ def _esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 def list_terminals() -> list:
+    ok, output = _osascript(LIST_SCRIPT)
+    if not ok:
+        return []
     out = []
-    for line in _osascript(LIST_SCRIPT).splitlines():
+    for line in output.splitlines():
         parts = line.split("\t")
         if len(parts) < 5:
             continue
@@ -85,7 +100,10 @@ def build_restore_script(target_window, prev_terminal, front_window) -> str:
     activate window (first window whose id is "{_esc(front_window)}")
 end tell'''
 
-def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> None:
+def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
+    """Open a Ghostty session for `alias`. Returns True only when the spawn
+    invocation itself succeeded — the caller (cmd_spawn) uses this to avoid
+    reporting a session as open when no tab was actually created."""
     rows = list_terminals()
     front = rows[0]["front_window"] if rows else None
     window = window_for_cwd(cwd, rows)
@@ -94,10 +112,14 @@ def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> None:
     env = [f"COMMS_ALIAS={alias}"]
     if role:
         env.append(f"COMMS_ROLE={role}")
-    _osascript(build_spawn_script(cwd, "claude", briefing, env, window))
+    ok, _ = _osascript(build_spawn_script(cwd, "claude", briefing, env, window))
     if window and prev_terminal and front:
         # Separate invocation on purpose: `select tab` issued right after
         # `new tab` in the same script is silently ignored, even with a
         # delay, because Ghostty selects the new tab asynchronously and
         # overrides anything in the same pass. Do not merge these calls.
+        # Best-effort: a failed focus restore does not change whether the
+        # spawn itself succeeded, and must not be allowed to flip `ok` to
+        # True either — its result is intentionally discarded.
         _osascript(build_restore_script(window, prev_terminal, front))
+    return ok

@@ -78,9 +78,13 @@ def cmd_spawn(args) -> int:
     if not presence.valid_alias(args.alias):
         print(f"alias inválido: {args.alias!r}")
         return 2
-    ghostty.spawn(args.alias, args.cwd or os.getcwd(), args.briefing,
-                  role=presence.role_for(args.alias))
-    print(f"sessão {args.alias} aberta em {args.cwd or os.getcwd()}")
+    cwd = args.cwd or os.getcwd()
+    ok = ghostty.spawn(args.alias, cwd, args.briefing, role=presence.role_for(args.alias))
+    if not ok:
+        print(f"falha ao abrir sessão {args.alias} — Ghostty pode não estar rodando, "
+              f"ou a permissão de Automação (System Settings > Privacy & Security) não foi concedida")
+        return 1
+    print(f"sessão {args.alias} aberta em {cwd}")
     return 0
 
 def build_parser() -> argparse.ArgumentParser:

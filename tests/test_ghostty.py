@@ -1,5 +1,6 @@
 # tests/test_ghostty.py — script generation only; no AppleScript is executed
 import unittest
+from unittest import mock
 
 class GhosttyScriptTest(unittest.TestCase):
     def test_spawn_script_carries_all_four_fields(self):
@@ -54,6 +55,24 @@ class GhosttyScriptTest(unittest.TestCase):
         s = ghostty.build_spawn_script(cwd="/tmp", command="claude",
                                        initial_input=tricky, env=[], window=None)
         self.assertIn('linha 1\nele disse \\"oi\\" \\\\ ok', s)
+
+    def test_spawn_returns_false_when_osascript_fails(self):
+        # _osascript never runs for real here — it's monkeypatched to report
+        # the failure pair a caller would see if Ghostty weren't running or
+        # Automation permission were denied.
+        from comms import ghostty
+        with mock.patch.object(ghostty, "_osascript", return_value=(False, "")):
+            self.assertFalse(ghostty.spawn("front", "/tmp", "oi"))
+
+    def test_spawn_returns_true_when_osascript_succeeds(self):
+        from comms import ghostty
+        with mock.patch.object(ghostty, "_osascript", return_value=(True, "")):
+            self.assertTrue(ghostty.spawn("front", "/tmp", "oi"))
+
+    def test_list_terminals_empty_when_osascript_fails(self):
+        from comms import ghostty
+        with mock.patch.object(ghostty, "_osascript", return_value=(False, "")):
+            self.assertEqual(ghostty.list_terminals(), [])
 
 if __name__ == "__main__":
     unittest.main()
