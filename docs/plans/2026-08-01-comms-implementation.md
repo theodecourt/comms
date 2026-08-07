@@ -20,6 +20,15 @@
 - **`orch` is the only alias that maps to the orchestrator role.** Everything else defaults to `builder`.
 - **Never write `--from`.** The sender is always derived: `COMMS_ALIAS` env, else the presence entry whose `session` matches `CLAUDE_CODE_SESSION_ID`.
 - **Ghostty: target windows by `working directory`, never by index.** Window order follows focus and changes between calls.
+- **Every test class that sets `COMMS_ROOT` MUST have a matching `tearDown`** that pops the variable and removes the temp directory. Task 9 runs `unittest discover`, so all suites share one process — a leaked `COMMS_ROOT` makes later suites order-dependent. This overrides the `setUp`-only code shown in the task steps (ruling: 2026-08-01, reviewer over plan text):
+
+  ```python
+  def tearDown(self):
+      os.environ.pop("COMMS_ROOT", None)
+      shutil.rmtree(self.tmp, ignore_errors=True)
+  ```
+
+- **Never commit `__pycache__/` or `*.pyc`.** They are in `.gitignore`; keep them out of `git add`.
 
 ---
 
