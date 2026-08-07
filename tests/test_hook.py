@@ -1,0 +1,71 @@
+import json, os, shutil, subprocess, sys, tempfile, unittest
+
+HOOK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "hooks", "comms-hook.py")
+
+class HookTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.environ["COMMS_ROOT"] = self.tmp
+        from comms import presence
+        presence.open("front", session="sess-1")
+
+    def tearDown(self):
+        for k in ("COMMS_ROOT", "COMMS_ALIAS", "CLAUDE_CODE_SESSION_ID"):
+            os.environ.pop(k, None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def fire(self, event, session="sess-1", transcript=""):
+        env = dict(os.environ, COMMS_ROOT=self.tmp)
+        payload = json.dumps({"session_id": session, "hook_event_name": event,
+                              "cwd": "/tmp", "transcript_path": transcript})
+        return subprocess.run([sys.executable, HOOK], input=payload,
+                              capture_output=True, text=True, env=env)
+
+    def status(self, alias="front"):
+        from comms import presence
+        return [e for e in presence.read_all() if e["alias"] == alias][0]["status"]
+
+    def test_user_prompt_sets_working(self):
+        self.fire("UserPromptSubmit")
+        self.assertEqual(self.status(), "working")
+
+    def test_stop_sets_idle(self):
+        self.fire("UserPromptSubmit"); self.fire("Stop")
+        self.assertEqual(self.status(), "idle")
+
+    def test_notification_sets_waiting_human(self):
+        self.fire("Notification")
+        self.assertEqual(self.status(), "waiting-human")
+
+    def test_session_end_removes_presence(self):
+        from comms import presence
+        self.fire("SessionEnd")
+        self.assertEqual(presence.read_all(), [])
+
+    def test_unknown_session_is_ignored_and_exits_zero(self):
+        r = self.fire("Stop", session="sess-unknown")
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.status(), "idle")
+
+    def test_garbage_stdin_exits_zero(self):
+        env = dict(os.environ, COMMS_ROOT=self.tmp)
+        r = subprocess.run([sys.executable, HOOK], input="{not json",
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0)
+
+    def test_empty_stdin_exits_zero(self):
+        env = dict(os.environ, COMMS_ROOT=self.tmp)
+        r = subprocess.run([sys.executable, HOOK], input="",
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0)
+
+    def test_large_transcript_emits_context_warning(self):
+        big = os.path.join(self.tmp, "big.jsonl")
+        with open(big, "w") as fh:
+            fh.write("x" * 2_000_000)
+        r = self.fire("Stop", transcript=big)
+        self.assertIn("contexto", r.stdout.lower())
+
+if __name__ == "__main__":
+    unittest.main()
