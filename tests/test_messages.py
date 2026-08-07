@@ -63,5 +63,14 @@ class MessagesTest(unittest.TestCase):
         presence.open("infra")
         self.assertEqual(len(messages.inbox("infra")), 1)
 
+    def test_order_holds_when_timestamps_collide(self):
+        from unittest.mock import patch
+        from comms import messages
+        with patch("comms.messages.time.time", return_value=1234567890.0):
+            for i in range(5):
+                messages.post("orch", f"m{i}", to="front")
+        bodies = [m["body"] for m in messages.inbox("front")]
+        self.assertEqual(bodies, ["m0", "m1", "m2", "m3", "m4"])
+
 if __name__ == "__main__":
     unittest.main()

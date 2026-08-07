@@ -1,11 +1,13 @@
 """One message is one file. Delivery is a write into the recipient's inbox;
 reading moves it to the log. Nothing is ever deleted."""
-import json, os, time, uuid
+import itertools, json, os, time, uuid
 from comms import paths, store
+
+_seq = itertools.count()
 
 def _deliver(alias: str, msg: dict) -> None:
     store.ensure_dirs(alias)
-    name = f"{msg['ts']:.6f}-{msg['id']}.json"
+    name = f"{msg['ts']:.6f}-{next(_seq):06d}-{msg['id']}.json"
     store.write_json(os.path.join(paths.inbox_dir(alias), name), msg)
 
 def _append_log(alias: str, msg: dict) -> None:
