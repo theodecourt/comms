@@ -257,6 +257,11 @@ pior que ter recusado. O orquestrador não pode simplesmente parar, então troca
 
 ### Detecção do limiar
 
+> **Correção 2026-08-01:** o gatilho é `UserPromptSubmit`, não `Stop`. O stdout de um hook
+> só é injetado no contexto do modelo em `UserPromptSubmit` e `SessionStart` — em `Stop` ele
+> não chega. Avisar no início do turno também é melhor: o builder decide *antes* de aceitar
+> tarefa nova, em vez de descobrir depois de já ter feito.
+
 O agente **não tem leitura da própria porcentagem de contexto** — o número que aparece na
 interface não chega ao modelo. Proxy: o transcript da sessão
 (`~/.claude/projects/<dir>/<uuid>.jsonl`) cresce, e um hook no `Stop` mede o tamanho e injeta
