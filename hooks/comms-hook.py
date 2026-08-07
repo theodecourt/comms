@@ -3,8 +3,6 @@
 exits 0 silently, because a raising hook would break the user's session."""
 import json, os, sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 STATUS_BY_EVENT = {
     "UserPromptSubmit": "working",
     "Stop": "idle",
@@ -16,6 +14,8 @@ STATUS_BY_EVENT = {
 WARN_BYTES = {"orchestrator": 1_600_000, "builder": 1_400_000}
 
 def main() -> int:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
     raw = sys.stdin.read()
     if not raw.strip():
         return 0
@@ -46,7 +46,11 @@ def main() -> int:
     status = STATUS_BY_EVENT.get(name)
     presence.touch(alias, status=status)
 
-    if name == "Stop":
+    if name == "UserPromptSubmit":
+        # Claude Code only forwards a hook's stdout into the model's context
+        # on UserPromptSubmit (and SessionStart) — printing this on Stop
+        # would be silently dropped, so the warning has to fire here, at the
+        # start of the turn it should affect.
         transcript = event.get("transcript_path") or ""
         role = presence.role_for(alias)
         limit = WARN_BYTES.get(role, WARN_BYTES["builder"])

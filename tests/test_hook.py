@@ -64,8 +64,27 @@ class HookTest(unittest.TestCase):
         big = os.path.join(self.tmp, "big.jsonl")
         with open(big, "w") as fh:
             fh.write("x" * 2_000_000)
-        r = self.fire("Stop", transcript=big)
+        r = self.fire("UserPromptSubmit", transcript=big)
         self.assertIn("contexto", r.stdout.lower())
+
+    def test_large_transcript_on_stop_emits_no_warning(self):
+        # Claude Code only forwards hook stdout into the model's context on
+        # UserPromptSubmit (and SessionStart), never on Stop — a warning
+        # printed there would be inert, so Stop must stay silent.
+        big = os.path.join(self.tmp, "big.jsonl")
+        with open(big, "w") as fh:
+            fh.write("x" * 2_000_000)
+        r = self.fire("Stop", transcript=big)
+        self.assertNotIn("contexto", r.stdout.lower())
+
+    def test_large_transcript_emits_orchestrator_warning(self):
+        from comms import presence
+        presence.open("orch", session="sess-orch")
+        big = os.path.join(self.tmp, "big.jsonl")
+        with open(big, "w") as fh:
+            fh.write("x" * 2_000_000)
+        r = self.fire("UserPromptSubmit", session="sess-orch", transcript=big)
+        self.assertIn("comms handoff", r.stdout)
 
 if __name__ == "__main__":
     unittest.main()
