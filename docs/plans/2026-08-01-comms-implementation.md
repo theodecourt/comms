@@ -19,6 +19,7 @@
 - **Alias rules:** lowercase, `[a-z0-9-]+` only. No spaces, no `#`.
 - **`orch` is the only alias that maps to the orchestrator role.** Everything else defaults to `builder`.
 - **Never write `--from`.** The sender is always derived: `COMMS_ALIAS` env, else the presence entry whose `session` matches `CLAUDE_CODE_SESSION_ID`.
+- **Message filenames carry a per-process sequence counter** (`itertools.count()`) between the timestamp and the id, so a single sender's messages keep send order even when `time.time()` returns identical values (measured: 10 calls → 3 distinct values on this machine). Ordering between different processes is best-effort by design (ruling: 2026-08-01).
 - **Ghostty: target windows by `working directory`, never by index.** Window order follows focus and changes between calls.
 - **Every test class that sets `COMMS_ROOT` MUST have a matching `tearDown`** that pops the variable and removes the temp directory. Task 9 runs `unittest discover`, so all suites share one process — a leaked `COMMS_ROOT` makes later suites order-dependent. This overrides the `setUp`-only code shown in the task steps (ruling: 2026-08-01, reviewer over plan text):
 
