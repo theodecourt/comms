@@ -73,6 +73,16 @@ def cmd_wait(args) -> int:
     print(f"DOORBELL: {reason}")
     return 0
 
+def cmd_spawn(args) -> int:
+    from comms import ghostty
+    if not presence.valid_alias(args.alias):
+        print(f"alias inválido: {args.alias!r}")
+        return 2
+    ghostty.spawn(args.alias, args.cwd or os.getcwd(), args.briefing,
+                  role=presence.role_for(args.alias))
+    print(f"sessão {args.alias} aberta em {args.cwd or os.getcwd()}")
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="comms")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -96,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--interval", type=float, default=presence.POLL_INTERVAL)
     w.add_argument("--max-seconds", dest="max_seconds", type=float, default=None)
     w.set_defaults(fn=cmd_wait)
+
+    sp = sub.add_parser("spawn"); sp.add_argument("alias")
+    sp.add_argument("--cwd", default=None)
+    sp.add_argument("--briefing", default="")
+    sp.set_defaults(fn=cmd_spawn)
     return p
 
 def main(argv=None) -> int:
