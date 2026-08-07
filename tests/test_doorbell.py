@@ -60,5 +60,12 @@ class DoorbellTest(unittest.TestCase):
         self.assertEqual(
             doorbell.wait("front", interval=0.05, max_seconds=0.3), "timeout")
 
+    def test_wait_times_out_without_waiting_a_whole_interval(self):
+        from comms import doorbell
+        started = time.time()
+        self.assertEqual(
+            doorbell.wait("front", interval=5, max_seconds=0.1), "timeout")
+        self.assertLess(time.time() - started, 1.0)
+
 if __name__ == "__main__":
     unittest.main()

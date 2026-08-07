@@ -18,6 +18,10 @@ def wait(alias: str, interval: float = presence.POLL_INTERVAL,
         if has_mail(alias):
             return "mail"
         presence.touch(alias)                     # heartbeat
-        if max_seconds is not None and (time.time() - started) >= max_seconds:
+        if max_seconds is None:
+            time.sleep(interval)
+            continue
+        remaining = max_seconds - (time.time() - started)
+        if remaining <= 0:
             return "timeout"
-        time.sleep(interval)
+        time.sleep(min(interval, remaining))
