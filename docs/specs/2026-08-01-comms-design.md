@@ -33,7 +33,7 @@ fica (seção 7).
 | `ai` | builder especialista | `segura-intelligence` | prompts, skills, MCP, KB |
 | `front` | builder especialista | `segura-portal-corretores` | frontend |
 | `infra` | builder especialista | conforme a tarefa | infra, arquitetura |
-| `theo` | o humano | — | endereçável; recebe push notification |
+| `theo` | o humano | — | endereçável; ver 4.1 |
 
 **A especialização não é o rótulo.** É *em que repo a sessão abre* — que carrega o `AGENTS.md`
 daquele repo — e *quais skills pré-carregam*. `ai` puxa `prompt-craft` e
@@ -104,11 +104,32 @@ sistema adivinha "mexendo no CardModal". Os hooks sabem se está vivo, e nunca e
 | Hook | `status` |
 |---|---|
 | `UserPromptSubmit` | `working` |
-| `Stop` | `done` — turno encerrado |
+| `Stop` | `idle` — turno encerrado, disponível |
 | `Notification` | `waiting-human` — pedindo permissão ou atenção |
 | `SessionEnd` | remove o arquivo de presença |
 
-Todo evento atualiza `last_seen`. `comms who` marca **stale** quem passou do TTL.
+### Liveness ≠ atividade
+
+Hooks sozinhos **não bastam**. Um agente ocioso com a campainha armada não dispara hook nenhum:
+`Stop` já passou, e até chegar mensagem nada mais acontece. O `last_seen` congelaria e ele
+apareceria como morto — sendo que esse é o estado mais saudável possível.
+
+**A campainha é o batimento.** O processo `comms wait` atualiza `last_seen` a cada volta do
+laço. Ele só existe enquanto está vivo, então:
+
+| Situação | `last_seen` | Leitura |
+|---|---|---|
+| trabalhando | hooks atualizam | vivo |
+| ocioso, campainha armada | `wait` atualiza | vivo e alcançável |
+| campainha morta | ninguém atualiza | **stale — não vai receber mensagem** |
+| sessão encerrada | arquivo removido | fora do board |
+
+Isso resolve o modo de falha principal do sistema original: lá, campainha morta e agente
+saudável eram indistinguíveis. Aqui, campainha morta é exatamente o que o stale significa.
+
+**TTL:** `3 × intervalo de polling`. Com polling de 2s, stale acima de 6s. Duas batidas perdidas
+já indicam processo morto, e o custo de um falso positivo é baixo — a mensagem fica no inbox e
+é entregue quando o agente rearmar.
 
 ### Por que isso importa
 
@@ -119,8 +140,19 @@ Na versão do João a presença era escrita só pelo agente, e o resultado está
 Com hooks, agente morto para de bater ponto e aparece como stale. O bug é projetado para fora,
 não documentado.
 
-Isso também resolve a distinção que o Theo precisa: **terminou** (`done`) versus **travado
-esperando você** (`waiting-human`) — o notificador dele lê `status` e sabe qual é qual.
+### 4.1 Como o humano é avisado
+
+O Theo já tem um sistema que avisa quando uma sessão pede atenção. O que faltava era distinguir
+**terminou** de **travado esperando ele** — e é exatamente o que `status` entrega:
+
+- `idle` → fez o que tinha que fazer, nada pendente
+- `waiting-human` → parado, precisa de resposta para continuar
+
+O notificador lê `presence/*.json` e decide. Nenhum canal novo precisa ser construído: `comms`
+publica o estado, o notificador existente consome.
+
+Um agente que quer falar com o humano posta `--to theo`; a mensagem fica no inbox dele e o
+`status` de quem postou vira `waiting-human` se ele estiver bloqueado pela resposta.
 
 ---
 
@@ -321,9 +353,8 @@ autenticação · sincronização remota do board.
 ## 12. Riscos e pontos a calibrar
 
 - **Limiar por tamanho de transcript é aproximação.** Calibrar com sessões reais antes de confiar.
-- **TTL da presença** precisa de número. Curto demais marca vivo como stale; longo demais
-  reintroduz o bug que estamos evitando.
-- **Intervalo do polling** da campainha: 2s é chute. Medir custo real e avaliar `Monitor`.
+- **Intervalo do polling** da campainha: 2s é chute, e o TTL deriva dele (3×). Medir custo real
+  e avaliar `Monitor`. Se o polling ficar mais lento, o TTL acompanha.
 - **Rearme esquecido** continua sendo o modo de falha principal, agora mitigado: mesmo surdo, o
   agente aparece com `status` correto, então quem manda mensagem percebe.
 - **Escrita concorrente** no mesmo inbox: temp + rename resolve para este volume. Revisitar se
