@@ -66,6 +66,13 @@ def cmd_close(args) -> int:
     print(f"{me} fechado")
     return 0
 
+def cmd_wait(args) -> int:
+    from comms import doorbell
+    me = resolve_self()
+    reason = doorbell.wait(me, interval=args.interval, max_seconds=args.max_seconds)
+    print(f"DOORBELL: {reason}")
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="comms")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -85,6 +92,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("log").set_defaults(fn=cmd_log)
     sub.add_parser("close").set_defaults(fn=cmd_close)
+    w = sub.add_parser("wait")
+    w.add_argument("--interval", type=float, default=presence.POLL_INTERVAL)
+    w.add_argument("--max-seconds", dest="max_seconds", type=float, default=None)
+    w.set_defaults(fn=cmd_wait)
     return p
 
 def main(argv=None) -> int:

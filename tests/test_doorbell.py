@@ -1,0 +1,64 @@
+import os, shutil, tempfile, threading, time, unittest
+
+class DoorbellTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.environ["COMMS_ROOT"] = self.tmp
+        from comms import presence
+        presence.open("front")
+        presence.open("orch")
+
+    def tearDown(self):
+        os.environ.pop("COMMS_ROOT", None)
+        os.environ.pop("COMMS_ALIAS", None)
+        os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_has_mail_false_when_inbox_empty(self):
+        from comms import doorbell
+        self.assertFalse(doorbell.has_mail("front"))
+
+    def test_has_mail_true_after_post(self):
+        from comms import doorbell, messages
+        messages.post("orch", "oi", to="front")
+        self.assertTrue(doorbell.has_mail("front"))
+
+    def test_wait_returns_mail_when_message_arrives(self):
+        from comms import doorbell, messages
+        result = {}
+        t = threading.Thread(target=lambda: result.update(
+            r=doorbell.wait("front", interval=0.05, max_seconds=5)))
+        t.start()
+        time.sleep(0.2)
+        messages.post("orch", "acorda", to="front")
+        t.join(timeout=5)
+        self.assertEqual(result.get("r"), "mail")
+
+    def test_wait_returns_closed_when_presence_removed(self):
+        from comms import doorbell, presence
+        result = {}
+        t = threading.Thread(target=lambda: result.update(
+            r=doorbell.wait("front", interval=0.05, max_seconds=5)))
+        t.start()
+        time.sleep(0.2)
+        presence.close("front")
+        t.join(timeout=5)
+        self.assertEqual(result.get("r"), "closed")
+
+    def test_wait_heartbeats_presence(self):
+        from comms import doorbell, presence, store, paths
+        p = paths.presence_file("front")
+        e = store.read_json(p)
+        e["last_seen"] = time.time() - 999
+        store.write_json(p, e)
+        doorbell.wait("front", interval=0.05, max_seconds=0.4)
+        fresh = [x for x in presence.read_all() if x["alias"] == "front"][0]
+        self.assertFalse(fresh["stale"])
+
+    def test_wait_times_out(self):
+        from comms import doorbell
+        self.assertEqual(
+            doorbell.wait("front", interval=0.05, max_seconds=0.3), "timeout")
+
+if __name__ == "__main__":
+    unittest.main()
