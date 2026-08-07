@@ -1,9 +1,13 @@
-import json, os, tempfile, unittest
+import json, os, shutil, tempfile, unittest
 
 class StoreTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         os.environ["COMMS_ROOT"] = self.tmp
+
+    def tearDown(self):
+        os.environ.pop("COMMS_ROOT", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_root_honours_env(self):
         from comms import paths
