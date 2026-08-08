@@ -1,4 +1,5 @@
-import os, shutil, tempfile, unittest
+import io, os, shutil, tempfile, unittest
+from contextlib import redirect_stdout
 
 
 def builtins_read(path):
@@ -53,9 +54,13 @@ class HandoffTest(unittest.TestCase):
 
     def test_run_raises_and_preserves_board_when_spawn_reports_failure(self):
         from comms import handoff, messages, presence
-        with self.assertRaises(SystemExit):
+        # run() prints the failure before raising; capture it so the suite's
+        # output stays pristine, and assert on it while we have it.
+        buf = io.StringIO()
+        with redirect_stdout(buf), self.assertRaises(SystemExit):
             handoff.run("orch", "estado", "2026-08-01",
                         spawn_fn=lambda **kw: False)
+        self.assertIn("continua no board", buf.getvalue())
         # old presence entry survives — the fleet must not believe orch is gone
         self.assertTrue(any(e["alias"] == "orch" for e in presence.read_all()))
         # no broadcast went out announcing a swap that never happened
