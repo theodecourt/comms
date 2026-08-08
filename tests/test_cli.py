@@ -71,5 +71,28 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(out.strip())
 
+    def test_handoff_reports_alias_not_on_board(self):
+        # No `open` was ever run for this alias — it is simply not on the
+        # board. The CLI must print why, not just exit non-zero silently.
+        os.environ["COMMS_ALIAS"] = "fantasma"
+        code, out = run("handoff", "estado qualquer")
+        self.assertNotEqual(code, 0)
+        self.assertIn("não está no board", out)
+
+    def test_handoff_reports_spawn_failure_and_keeps_old_session_on_board(self):
+        from comms import presence
+        from unittest import mock
+        repo = tempfile.mkdtemp()
+        try:
+            presence.open("orch", note="coordenando", cwd=repo)
+            os.environ["COMMS_ALIAS"] = "orch"
+            with mock.patch("comms.ghostty.spawn", return_value=False):
+                code, out = run("handoff", "estado atual")
+            self.assertNotEqual(code, 0)
+            self.assertIn("continua no board", out)
+            self.assertTrue(any(e["alias"] == "orch" for e in presence.read_all()))
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
 if __name__ == "__main__":
     unittest.main()

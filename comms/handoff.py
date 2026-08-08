@@ -16,7 +16,8 @@ def write_doc(path: str, alias: str, note: str, body: str) -> None:
 def run(alias: str, body: str, stamp: str, spawn_fn=None) -> str:
     entry = next((e for e in presence.read_all() if e["alias"] == alias), None)
     if entry is None:
-        raise SystemExit(f"{alias} não está no board")
+        print(f"{alias} não está no board")
+        raise SystemExit(2)
     cwd = entry.get("cwd") or os.getcwd()
     path = doc_path(cwd, alias, stamp)
     write_doc(path, alias, entry.get("note", ""), body)
@@ -34,11 +35,12 @@ def run(alias: str, body: str, stamp: str, spawn_fn=None) -> str:
     # successor here would leave the board with no orchestrator at all, so
     # the old presence entry must survive and no swap must be announced.
     if spawned is False:
-        raise SystemExit(
+        print(
             f"não foi possível abrir a sessão sucessora de {alias} — a sessão "
             f"antiga continua no board; corrija o problema (Ghostty rodando? "
             f"permissão de Automação concedida?) e rode `comms handoff` novamente"
         )
+        raise SystemExit(1)
 
     # Broadcast before closing: if post() ever raised, the old presence entry
     # would still be there and the board would reflect reality. Closing first
