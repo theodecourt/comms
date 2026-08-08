@@ -87,6 +87,15 @@ def cmd_spawn(args) -> int:
     print(f"sessão {args.alias} aberta em {cwd}")
     return 0
 
+def cmd_handoff(args) -> int:
+    from comms import handoff
+    import datetime
+    me = args.alias or resolve_self()
+    stamp = args.stamp or datetime.date.today().isoformat()
+    path = handoff.run(me, args.body, stamp)
+    print(f"handoff escrito em {path}")
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="comms")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -115,6 +124,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--cwd", default=None)
     sp.add_argument("--briefing", default="")
     sp.set_defaults(fn=cmd_spawn)
+
+    h = sub.add_parser("handoff")
+    h.add_argument("body")
+    h.add_argument("--alias", default=None)
+    h.add_argument("--stamp", default=None)
+    h.set_defaults(fn=cmd_handoff)
     return p
 
 def main(argv=None) -> int:
