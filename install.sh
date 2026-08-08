@@ -13,4 +13,9 @@ chmod +x "$REPO/hooks/comms-hook.py" 2>/dev/null || true
 if ! command -v comms >/dev/null 2>&1; then
   echo "⚠ ~/.local/bin não está no PATH desta shell — abra um terminal novo"
 fi
+
+mkdir -p "$HOME/.claude/skills"
+ln -sfn "$REPO/skills/open-comms" "$HOME/.claude/skills/open-comms"
+echo "✓ skill open-comms → ~/.claude/skills/open-comms"
+
 echo "Para ligar os hooks de presença: python3 $REPO/hooks/install_hooks.py"
