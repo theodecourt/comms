@@ -79,6 +79,12 @@ def cmd_spawn(args) -> int:
         print(f"alias inválido: {args.alias!r}")
         return 2
     cwd = args.cwd or os.getcwd()
+    if not ghostty.is_trusted_dir(cwd):
+        print(f"{cwd} nunca foi aberto no Claude Code, então a sessão travaria no "
+              f"diálogo de confiança esperando uma tecla — e o board não mostraria "
+              f"nada. Abra o diretório uma vez manualmente (`cd {cwd} && claude`), "
+              f"aceite o diálogo, e rode o spawn de novo.")
+        return 2
     ok = ghostty.spawn(args.alias, cwd, args.briefing, role=presence.role_for(args.alias))
     if not ok:
         print(f"falha ao abrir sessão {args.alias} — Ghostty pode não estar rodando, "

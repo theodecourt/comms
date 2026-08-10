@@ -3,6 +3,23 @@ import json, os, shutil, subprocess, sys, tempfile, unittest
 HOOK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     "hooks", "comms-hook.py")
 
+def _oversized_bytes():
+    """Size just over the hook's own warning threshold.
+
+    Sized past the LARGEST threshold so one fixture serves every test — the
+    alias, not the size, decides which message comes out. Reading the constant
+    instead of hardcoding a number means recalibrating WARN_BYTES cannot
+    silently stop these tests from exercising the warning.
+    """
+    import importlib.util, os
+    hook = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "hooks", "comms-hook.py")
+    spec = importlib.util.spec_from_file_location("_comms_hook", hook)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return max(mod.WARN_BYTES.values()) + 1_000
+
+
 class HookTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -63,7 +80,7 @@ class HookTest(unittest.TestCase):
     def test_large_transcript_emits_context_warning(self):
         big = os.path.join(self.tmp, "big.jsonl")
         with open(big, "w") as fh:
-            fh.write("x" * 2_000_000)
+            fh.write("x" * _oversized_bytes())
         r = self.fire("UserPromptSubmit", transcript=big)
         self.assertIn("contexto", r.stdout.lower())
 
@@ -73,7 +90,7 @@ class HookTest(unittest.TestCase):
         # printed there would be inert, so Stop must stay silent.
         big = os.path.join(self.tmp, "big.jsonl")
         with open(big, "w") as fh:
-            fh.write("x" * 2_000_000)
+            fh.write("x" * _oversized_bytes())
         r = self.fire("Stop", transcript=big)
         self.assertNotIn("contexto", r.stdout.lower())
 
@@ -82,7 +99,7 @@ class HookTest(unittest.TestCase):
         presence.open("orch", session="sess-orch")
         big = os.path.join(self.tmp, "big.jsonl")
         with open(big, "w") as fh:
-            fh.write("x" * 2_000_000)
+            fh.write("x" * _oversized_bytes())
         r = self.fire("UserPromptSubmit", session="sess-orch", transcript=big)
         self.assertIn("comms handoff", r.stdout)
 

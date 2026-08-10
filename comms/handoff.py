@@ -19,6 +19,16 @@ def run(alias: str, body: str, stamp: str, spawn_fn=None) -> str:
         print(f"{alias} não está no board")
         raise SystemExit(2)
     cwd = entry.get("cwd") or os.getcwd()
+    # Check before writing anything: a successor spawned into a directory
+    # Claude Code has never seen would block on the trust dialog, and the
+    # handoff would have already closed the only live session on this alias.
+    if spawn_fn is None:
+        from comms import ghostty
+        if not ghostty.is_trusted_dir(cwd):
+            print(f"{cwd} nunca foi aberto no Claude Code — a sessão sucessora "
+                  f"travaria no diálogo de confiança e você perderia {alias}. "
+                  f"Abra o diretório uma vez manualmente e tente de novo.")
+            raise SystemExit(2)
     path = doc_path(cwd, alias, stamp)
     write_doc(path, alias, entry.get("note", ""), body)
 

@@ -1,6 +1,6 @@
 """Drives Ghostty over AppleScript. The constraints encoded here were measured
 on 2026-08-01 — see docs/specs §10.2 before changing any of them."""
-import os, subprocess, tempfile
+import json, os, subprocess, tempfile
 
 LIST_SCRIPT = """
 tell application "Ghostty"
@@ -122,6 +122,22 @@ def build_restore_script(target_window, prev_terminal, front_window) -> str:
     end repeat
     activate window (first window whose id is "{_esc(front_window)}")
 end tell'''
+
+def is_trusted_dir(cwd: str) -> bool:
+    """Whether Claude Code has already been opened in `cwd`.
+
+    A session started in a directory Claude Code has never seen blocks on its
+    "do you trust the files in this folder?" prompt, waiting for a keypress.
+    A spawned builder would sit there forever while the board shows nothing —
+    observed 2026-08-10. Directories that have been opened appear as keys in
+    ~/.claude.json; the dialog is Claude Code's own safety gate, so `comms`
+    checks it and refuses rather than trying to pre-approve anything."""
+    try:
+        with open(os.path.expanduser("~/.claude.json"), encoding="utf-8") as fh:
+            projects = json.load(fh).get("projects", {})
+    except (OSError, ValueError):
+        return True     # cannot tell — do not block the spawn on a guess
+    return os.path.realpath(cwd) in {os.path.realpath(k) for k in projects}
 
 def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     """Open a Ghostty session for `alias`. Returns True only when the spawn
