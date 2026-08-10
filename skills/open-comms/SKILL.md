@@ -82,11 +82,24 @@ a malicious one would.
 
 ## Writing a handoff
 
-`comms handoff "<state>"` writes the state twice: to `scratchpad/` for the
-successor to read, and to the Obsidian vault as an archive note that is
-committed and pushed. One text serves both, so write it the way an archive
-note should read — goal, what happened and why, result, files touched, links,
-and what is still open. A two-line handoff makes a two-line archive.
+`comms handoff "<state>" --resumo "<what happened>"` takes two texts, because
+they are two documents:
+
+- **`<state>`** goes to `scratchpad/` for the successor. Forward-looking: where
+  things stand, what is verified versus merely reported, what is next, what is
+  blocked and on whom.
+- **`--resumo`** goes to the Obsidian vault as an archive note, committed and
+  pushed. Backward-looking: goal, what happened and why, decisions made, files
+  touched, links, what is still open.
+
+Omit `--resumo` and the archive falls back to the state text, labelled as such.
+That is worse than writing both — a handoff state read six months later does
+not tell you what the session did.
+
+**Verify before you write the state.** A handoff carries forward whatever it
+claims, and a wrong entry costs the successor a full round trip to discover and
+correct. Anything you are reporting from memory rather than from a fresh read,
+either check it now or mark it explicitly as unverified.
 
 The successor is launched with the old session's display name plus `-novo`.
 The old session keeps its name: Claude Code owns that and will not pick up a

@@ -104,5 +104,28 @@ class HandoffTest(unittest.TestCase):
                         spawn_fn=lambda **kw: seen.update(kw) or True)
         self.assertEqual(seen["name"], "ORCH-COLETA-novo")
 
+    def test_summary_goes_to_the_vault_and_state_to_the_successor(self):
+        from comms import handoff
+        vault = os.environ["COMMS_VAULT"]
+        with redirect_stdout(io.StringIO()):
+            doc = handoff.run("orch", "ESTADO PARA O SUCESSOR", "2026-08-10",
+                              spawn_fn=lambda **kw: True,
+                              summary="RELATO DO QUE ACONTECEU")
+        note = [f for f in os.listdir(vault) if f.endswith(".md")][0]
+        vault_text = builtins_read(os.path.join(vault, note))
+        self.assertIn("RELATO DO QUE ACONTECEU", vault_text)
+        self.assertNotIn("ESTADO PARA O SUCESSOR", vault_text)
+        self.assertIn("ESTADO PARA O SUCESSOR", builtins_read(doc))
+
+    def test_without_summary_the_vault_note_says_it_is_a_fallback(self):
+        from comms import handoff
+        vault = os.environ["COMMS_VAULT"]
+        with redirect_stdout(io.StringIO()):
+            handoff.run("orch", "só o estado", "2026-08-10", spawn_fn=lambda **kw: True)
+        note = [f for f in os.listdir(vault) if f.endswith(".md")][0]
+        text = builtins_read(os.path.join(vault, note))
+        self.assertIn("Sem resumo de sessão", text)
+        self.assertIn("só o estado", text)
+
 if __name__ == "__main__":
     unittest.main()

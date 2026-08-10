@@ -108,7 +108,7 @@ def cmd_handoff(args) -> int:
     import datetime
     me = args.alias or resolve_self()
     stamp = args.stamp or datetime.date.today().isoformat()
-    path = handoff.run(me, args.body, stamp)
+    path = handoff.run(me, args.body, stamp, summary=args.resumo)
     print(f"handoff escrito em {path}")
     return 0
 
@@ -164,6 +164,9 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("body")
     h.add_argument("--alias", default=None)
     h.add_argument("--stamp", default=None)
+    h.add_argument("--resumo", default=None,
+                   help="resumo do que aconteceu na sessão, para a nota do vault "
+                        "(o argumento posicional é o estado para o sucessor)")
     h.set_defaults(fn=cmd_handoff)
     d = sub.add_parser("delegate"); d.add_argument("alias"); d.add_argument("scope")
     d.set_defaults(fn=cmd_delegate)

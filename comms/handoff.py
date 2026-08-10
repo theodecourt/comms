@@ -64,7 +64,11 @@ def write_doc(path: str, alias: str, note: str, body: str) -> None:
         fh.write("## Estado\n\n")
         fh.write(body.rstrip() + "\n")
 
-def run(alias: str, body: str, stamp: str, spawn_fn=None) -> str:
+def run(alias: str, body: str, stamp: str, spawn_fn=None, summary: str = None) -> str:
+    """`body` is forward-looking: what the successor needs to continue.
+    `summary` is backward-looking: what happened this session, for the vault
+    archive. They are different documents and one text serves neither well —
+    when `summary` is omitted the archive falls back to `body` and says so."""
     entry = next((e for e in presence.read_all() if e["alias"] == alias), None)
     if entry is None:
         print(f"{alias} não está no board")
@@ -120,8 +124,12 @@ def run(alias: str, body: str, stamp: str, spawn_fn=None) -> str:
     # is on disk either way.
     try:
         vp = vault_path(alias, stamp)
+        archive_body = summary or (
+            "_Sem resumo de sessão — o texto abaixo é o estado de handoff, "
+            "escrito para o sucessor continuar, não um relato do que aconteceu._\n\n"
+            + body)
         write_vault_note(vp, alias, stamp, os.path.basename(cwd),
-                         entry.get("session", ""), body)
+                         entry.get("session", ""), archive_body)
         if os.environ.get("COMMS_VAULT"):
             print(f"nota escrita em {vp} (COMMS_VAULT definido — sem commit/push)")
         elif publish_vault(vp):
