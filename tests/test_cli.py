@@ -86,13 +86,42 @@ class CliTest(unittest.TestCase):
         try:
             presence.open("orch", note="coordenando", cwd=repo)
             os.environ["COMMS_ALIAS"] = "orch"
-            with mock.patch("comms.ghostty.spawn", return_value=False):
+            # The temp repo has never been opened in Claude Code, so the
+            # trust-dialog guard would fire first. Neutralise it — this test
+            # is about the spawn-failure path, which sits after that guard.
+            with mock.patch("comms.ghostty.spawn", return_value=False), \
+                 mock.patch("comms.ghostty.is_trusted_dir", return_value=True):
                 code, out = run("handoff", "estado atual")
             self.assertNotEqual(code, 0)
             self.assertIn("continua no board", out)
             self.assertTrue(any(e["alias"] == "orch" for e in presence.read_all()))
         finally:
             shutil.rmtree(repo, ignore_errors=True)
+
+    def test_handoff_refuses_untrusted_dir_before_touching_the_board(self):
+        from comms import presence
+        from unittest import mock
+        repo = tempfile.mkdtemp()
+        try:
+            presence.open("orch", note="coordenando", cwd=repo)
+            os.environ["COMMS_ALIAS"] = "orch"
+            with mock.patch("comms.ghostty.is_trusted_dir", return_value=False):
+                code, out = run("handoff", "estado atual")
+            self.assertNotEqual(code, 0)
+            self.assertIn("nunca foi aberto", out)
+            # the board must be untouched: losing orch is the whole risk here
+            self.assertTrue(any(e["alias"] == "orch" for e in presence.read_all()))
+            self.assertFalse(os.path.isdir(os.path.join(repo, "scratchpad")))
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+    def test_spawn_refuses_untrusted_dir(self):
+        from unittest import mock
+        with mock.patch("comms.ghostty.is_trusted_dir", return_value=False):
+            code, out = run("spawn", "build-1", "--cwd", "/tmp", "--briefing", "oi")
+        self.assertEqual(code, 2)
+        self.assertIn("nunca foi aberto", out)
+
 
 if __name__ == "__main__":
     unittest.main()
