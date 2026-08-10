@@ -12,11 +12,14 @@ class CliTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         os.environ["COMMS_ROOT"] = self.tmp
+        # never let a test reach the real Obsidian vault: run() writes
+        # a note there and pushes it. Structural, not a reminder.
+        os.environ["COMMS_VAULT"] = os.path.join(self.tmp, "vault")
         for k in ("COMMS_ALIAS", "CLAUDE_CODE_SESSION_ID"):
             os.environ.pop(k, None)
 
     def tearDown(self):
-        for k in ("COMMS_ROOT", "COMMS_ALIAS", "CLAUDE_CODE_SESSION_ID"):
+        for k in ("COMMS_ROOT", "COMMS_VAULT", "COMMS_ALIAS", "CLAUDE_CODE_SESSION_ID"):
             os.environ.pop(k, None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 

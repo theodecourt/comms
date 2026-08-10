@@ -73,15 +73,21 @@ def shell_quote(s: str) -> str:
     """Wrap for a POSIX shell single-quoted argument."""
     return "'" + s.replace("'", "'\\''") + "'"
 
-def _briefing_launch(briefing: str) -> str:
+def _briefing_launch(briefing: str, name: str = "") -> str:
     """Write the briefing to a UTF-8 file and return a pure-ASCII shell line
     that reads it, deletes it, and launches claude with it. Ghostty mangles
-    non-ASCII in `initial input`; only ASCII may cross that boundary."""
+    non-ASCII in `initial input`; only ASCII may cross that boundary.
+
+    The display name travels in the file's first line for the same reason —
+    a name with an accent would be corrupted if inlined in the launch line."""
     fd, path = tempfile.mkstemp(prefix="comms-brief-", suffix=".txt")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(briefing)
+        fh.write(f"{name}\n{briefing}")
     q = shell_quote(path)
-    return f'B=$(cat {q}); rm -f {q}; claude "$B"'
+    read = f'N=$(head -1 {q}); B=$(tail -n +2 {q}); rm -f {q}'
+    if name:
+        return f'{read}; claude -n "$N" "$B"'
+    return f'{read}; claude "$B"'
 
 def build_spawn_script(cwd, command, initial_input, env, window) -> str:
     env_list = ", ".join(f'"{_esc(e)}"' for e in env)
@@ -139,7 +145,8 @@ def is_trusted_dir(cwd: str) -> bool:
         return True     # cannot tell — do not block the spawn on a guess
     return os.path.realpath(cwd) in {os.path.realpath(k) for k in projects}
 
-def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
+def spawn(alias: str, cwd: str, briefing: str, role: str = None,
+          name: str = None) -> bool:
     """Open a Ghostty session for `alias`. Returns True only when the spawn
     invocation itself succeeded — the caller (cmd_spawn) uses this to avoid
     reporting a session as open when no tab was actually created."""
@@ -160,7 +167,7 @@ def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     # Measured 2026-08-10 against a real spawn. Keeping the launch line pure
     # ASCII sidesteps it — Python writes the file as UTF-8 and the shell
     # reads it back intact.
-    launch = _briefing_launch(briefing)
+    launch = _briefing_launch(briefing, name=name or "")
     ok, _ = _osascript(build_spawn_script(cwd, None, launch, env, window))
     if window and prev_terminal and front:
         # Separate invocation on purpose: `select tab` issued right after

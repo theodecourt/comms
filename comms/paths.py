@@ -15,3 +15,9 @@ def inbox_dir(alias: str) -> str:
 
 def log_file(alias: str) -> str:
     return os.path.join(root(), "log", f"{alias}.jsonl")
+
+def delegation_dir() -> str:
+    return os.path.join(root(), "delegations")
+
+def delegation_file(alias: str) -> str:
+    return os.path.join(delegation_dir(), f"{alias}.json")

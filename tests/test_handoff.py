@@ -11,14 +11,18 @@ class HandoffTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         os.environ["COMMS_ROOT"] = self.tmp
+        # never let a test reach the real Obsidian vault: run() writes
+        # a note there and pushes it. Structural, not a reminder.
+        os.environ["COMMS_VAULT"] = os.path.join(self.tmp, "vault")
         self.repo = tempfile.mkdtemp()
         from comms import presence
         presence.open("orch", note="coordenando", cwd=self.repo)
         presence.open("front", cwd=self.repo)
 
     def tearDown(self):
-        os.environ.pop("COMMS_ROOT", None)
-        os.environ.pop("COMMS_ALIAS", None)
+        for k in ("COMMS_ROOT", "COMMS_VAULT", "COMMS_ALIAS",
+                  "CLAUDE_CODE_SESSION_ID"):
+            os.environ.pop(k, None)
         os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
         shutil.rmtree(self.tmp, ignore_errors=True)
         shutil.rmtree(self.repo, ignore_errors=True)
@@ -39,8 +43,9 @@ class HandoffTest(unittest.TestCase):
     def test_run_spawns_successor_and_broadcasts(self):
         from comms import handoff, messages
         calls = []
-        handoff.run("orch", "estado", "2026-08-01",
-                    spawn_fn=lambda **kw: calls.append(kw))
+        with redirect_stdout(io.StringIO()):
+            handoff.run("orch", "estado", "2026-08-01",
+                        spawn_fn=lambda **kw: calls.append(kw))
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["alias"], "orch")
         self.assertIn("handoff", calls[0]["briefing"].lower())
@@ -49,7 +54,8 @@ class HandoffTest(unittest.TestCase):
 
     def test_run_returns_readable_doc(self):
         from comms import handoff
-        p = handoff.run("orch", "estado atual", "2026-08-01", spawn_fn=lambda **kw: None)
+        with redirect_stdout(io.StringIO()):
+            p = handoff.run("orch", "estado atual", "2026-08-01", spawn_fn=lambda **kw: None)
         self.assertIn("estado atual", builtins_read(p))
 
     def test_run_raises_and_preserves_board_when_spawn_reports_failure(self):
@@ -66,6 +72,37 @@ class HandoffTest(unittest.TestCase):
         # no broadcast went out announcing a swap that never happened
         self.assertEqual(messages.inbox("front"), [])
 
+
+    def test_writes_a_vault_note_with_archive_frontmatter(self):
+        from comms import handoff
+        vault = os.environ["COMMS_VAULT"]
+        with redirect_stdout(io.StringIO()):
+            handoff.run("orch", "estado do ciclo", "2026-08-10", spawn_fn=lambda **kw: True)
+        notes = [f for f in os.listdir(vault) if f.endswith(".md")]
+        self.assertEqual(len(notes), 1)
+        text = builtins_read(os.path.join(vault, notes[0]))
+        self.assertIn("date: 2026-08-10", text)
+        self.assertIn("tags: [claude-session, handoff,", text)
+        self.assertIn("estado do ciclo", text)
+
+    def test_vault_note_does_not_overwrite_a_same_day_one(self):
+        from comms import handoff, presence
+        vault = os.environ["COMMS_VAULT"]
+        with redirect_stdout(io.StringIO()):
+            handoff.run("orch", "primeiro", "2026-08-10", spawn_fn=lambda **kw: True)
+            presence.open("orch", note="de novo", cwd=self.repo)
+            handoff.run("orch", "segundo", "2026-08-10", spawn_fn=lambda **kw: True)
+        self.assertEqual(len([f for f in os.listdir(vault) if f.endswith(".md")]), 2)
+
+    def test_successor_is_named_with_novo(self):
+        from comms import handoff
+        from unittest import mock
+        seen = {}
+        with mock.patch("comms.session.name_for", return_value="ORCH-COLETA"), \
+             redirect_stdout(io.StringIO()):
+            handoff.run("orch", "estado", "2026-08-10",
+                        spawn_fn=lambda **kw: seen.update(kw) or True)
+        self.assertEqual(seen["name"], "ORCH-COLETA-novo")
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,9 +1,60 @@
 """Replace a session that is running out of context, keeping its alias."""
 import os
-from comms import messages, presence
+import subprocess
+from comms import messages, presence, session
+
+def vault_root() -> str:
+    """Where archive notes land. Overridable with COMMS_VAULT so tests never
+    write into — or push to — the real Obsidian vault. Read at call time, for
+    the same reason paths.root() is."""
+    return os.environ.get("COMMS_VAULT") or os.path.expanduser(
+        "~/obsidian-segura/claude-code-session-history")
 
 def doc_path(cwd: str, alias: str, stamp: str) -> str:
     return os.path.join(cwd, "scratchpad", f"{stamp}-handoff-{alias}.md")
+
+def vault_path(alias: str, stamp: str, vault: str = None) -> str:
+    """Where the archive copy lands, avoiding same-day collisions the way
+    /archive-session does — a numbered suffix rather than an overwrite."""
+    base = vault or vault_root()
+    candidate = os.path.join(base, f"{stamp} Handoff {alias}.md")
+    n = 2
+    while os.path.exists(candidate):
+        candidate = os.path.join(base, f"{stamp} Handoff {alias} ({n}).md")
+        n += 1
+    return candidate
+
+def write_vault_note(path: str, alias: str, stamp: str, project: str,
+                     session_id: str, body: str) -> None:
+    """Archive copy for the Obsidian vault, with the frontmatter the
+    /archive-session notes use so both kinds of note query alike."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("---\n")
+        fh.write(f"date: {stamp}\n")
+        fh.write(f"project: {project}\n")
+        fh.write(f"session: {session_id}\n")
+        fh.write(f"tags: [claude-session, handoff, {project}]\n")
+        fh.write("---\n\n")
+        fh.write(f"# Handoff — {alias}\n\n")
+        fh.write(body.rstrip() + "\n")
+
+def publish_vault(path: str) -> bool:
+    """Commit and push the archive note. The vault exists to be backed up off
+    this machine, and `confirm-before-push` carves it out for exactly that.
+    A failure here must not fail the handoff — the note is already on disk."""
+    repo = os.path.dirname(os.path.dirname(path))
+    try:
+        subprocess.run(["git", "-C", repo, "add", path],
+                       capture_output=True, timeout=30, check=True)
+        subprocess.run(["git", "-C", repo, "commit", "-m",
+                        f"handoff: {os.path.basename(path)}"],
+                       capture_output=True, timeout=30, check=True)
+        subprocess.run(["git", "-C", repo, "push", "origin", "main"],
+                       capture_output=True, timeout=90, check=True)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 def write_doc(path: str, alias: str, note: str, body: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -38,8 +89,12 @@ def run(alias: str, body: str, stamp: str, spawn_fn=None) -> str:
     if spawn_fn is None:
         from comms import ghostty
         spawn_fn = ghostty.spawn
+    # The old session keeps its name — the client owns that and does not read a
+    # change from disk (verified 2026-08-10). The successor is marked instead.
+    old_name = session.name_for(entry.get("session", ""))
     spawned = spawn_fn(alias=alias, cwd=cwd, briefing=briefing,
-                        role=presence.role_for(alias))
+                        role=presence.role_for(alias),
+                        name=session.successor_name(old_name or ""))
     # spawn_fn may be a test stub that returns None (does not report) — only
     # an explicit False means the spawn is known to have failed. Losing the
     # successor here would leave the board with no orchestrator at all, so
@@ -59,4 +114,21 @@ def run(alias: str, body: str, stamp: str, spawn_fn=None) -> str:
     messages.post(alias, f"handoff: {alias} foi substituído por uma sessão nova. "
                          f"Estado em {path}.")
     presence.close(alias)
+
+    # Archive to the vault last: it is the one step whose failure should not
+    # cost the handoff. Everything above already succeeded, and the state doc
+    # is on disk either way.
+    try:
+        vp = vault_path(alias, stamp)
+        write_vault_note(vp, alias, stamp, os.path.basename(cwd),
+                         entry.get("session", ""), body)
+        if os.environ.get("COMMS_VAULT"):
+            print(f"nota escrita em {vp} (COMMS_VAULT definido — sem commit/push)")
+        elif publish_vault(vp):
+            print(f"arquivado no vault: {os.path.basename(vp)} (commitado e enviado)")
+        else:
+            print(f"arquivado no vault: {os.path.basename(vp)} "
+                  f"(local — o commit/push falhou, verifique o repo do vault)")
+    except OSError as e:
+        print(f"nota do vault não foi escrita ({e}) — o handoff em si está feito")
     return path

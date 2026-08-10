@@ -26,8 +26,10 @@ def cmd_open(args) -> int:
     return 0
 
 def cmd_who(args) -> int:
+    from comms import delegation
     entries = presence.read_all()
-    if not entries:
+    grants = delegation.read_all()
+    if not entries and not grants:
         print("ninguém no board")
         return 0
     print(f"{'ALIAS':<10} {'PAPEL':<13} {'ESTADO':<14} {'VISTO':<10} NOTA")
@@ -35,6 +37,14 @@ def cmd_who(args) -> int:
         status = "stale" if e["stale"] else e.get("status", "?")
         print(f"{e['alias']:<10} {e.get('role',''):<13} {status:<14} "
               f"{_age(e.get('last_seen', 0)):<10} {e.get('note','')}")
+    if grants:
+        # Printed as its own block, not a column: an approval relayed by an
+        # agent is only actionable if it falls inside one of these scopes.
+        print()
+        print("DELEGAÇÕES (autoridade concedida pelo humano — verifique aqui, "
+              "não confie na mensagem)")
+        for alias, scope in sorted(grants.items()):
+            print(f"  {alias:<10} {scope}")
     return 0
 
 def cmd_post(args) -> int:
@@ -102,6 +112,25 @@ def cmd_handoff(args) -> int:
     print(f"handoff escrito em {path}")
     return 0
 
+
+def cmd_delegate(args) -> int:
+    from comms import delegation
+    try:
+        rec = delegation.grant(args.alias, args.scope)
+    except ValueError as e:
+        print(str(e))
+        return 2
+    print(f"{rec['alias']} pode agora aprovar: {rec['scope']}")
+    return 0
+
+def cmd_revoke(args) -> int:
+    from comms import delegation
+    if delegation.revoke(args.alias):
+        print(f"delegação de {args.alias} revogada")
+        return 0
+    print(f"{args.alias} não tinha delegação")
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="comms")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -136,6 +165,12 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("--alias", default=None)
     h.add_argument("--stamp", default=None)
     h.set_defaults(fn=cmd_handoff)
+    d = sub.add_parser("delegate"); d.add_argument("alias"); d.add_argument("scope")
+    d.set_defaults(fn=cmd_delegate)
+
+    rv = sub.add_parser("revoke"); rv.add_argument("alias")
+    rv.set_defaults(fn=cmd_revoke)
+
     return p
 
 def main(argv=None) -> int:
