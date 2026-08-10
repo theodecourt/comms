@@ -102,7 +102,7 @@ class HandoffTest(unittest.TestCase):
              redirect_stdout(io.StringIO()):
             handoff.run("orch", "estado", "2026-08-10",
                         spawn_fn=lambda **kw: seen.update(kw) or True)
-        self.assertEqual(seen["name"], "ORCH-COLETA-novo")
+        self.assertEqual(seen["name"], "ORCH-COLETA-NOVO")
 
     def test_summary_goes_to_the_vault_and_state_to_the_successor(self):
         from comms import handoff
@@ -126,6 +126,34 @@ class HandoffTest(unittest.TestCase):
         text = builtins_read(os.path.join(vault, note))
         self.assertIn("Sem resumo de sessão", text)
         self.assertIn("só o estado", text)
+
+    def test_doc_path_never_overwrites_an_existing_handoff(self):
+        # The doc is git-excluded: an overwrite is unrecoverable except from
+        # the transcript of whoever last read it. Happened once, 2026-08-10.
+        from comms import handoff
+        first = handoff.doc_path(self.repo, "orch", "2026-08-10")
+        os.makedirs(os.path.dirname(first), exist_ok=True)
+        with open(first, "w") as fh:
+            fh.write("conteúdo que não pode ser perdido")
+        second = handoff.doc_path(self.repo, "orch", "2026-08-10")
+        self.assertNotEqual(first, second)
+        self.assertIn("(2)", second)
+        with open(first) as fh:
+            self.assertEqual(fh.read(), "conteúdo que não pode ser perdido")
+
+    def test_second_handoff_same_day_keeps_the_first_doc(self):
+        from comms import handoff
+        with redirect_stdout(io.StringIO()):
+            a = handoff.run("orch", "primeiro estado", "2026-08-10",
+                            spawn_fn=lambda **kw: True)
+        from comms import presence
+        presence.open("orch", note="de novo", cwd=self.repo)
+        with redirect_stdout(io.StringIO()):
+            b = handoff.run("orch", "segundo estado", "2026-08-10",
+                            spawn_fn=lambda **kw: True)
+        self.assertNotEqual(a, b)
+        self.assertIn("primeiro estado", builtins_read(a))
+        self.assertIn("segundo estado", builtins_read(b))
 
 if __name__ == "__main__":
     unittest.main()

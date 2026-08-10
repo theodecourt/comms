@@ -11,7 +11,20 @@ def vault_root() -> str:
         "~/obsidian-segura/claude-code-session-history")
 
 def doc_path(cwd: str, alias: str, stamp: str) -> str:
-    return os.path.join(cwd, "scratchpad", f"{stamp}-handoff-{alias}.md")
+    """Never returns a path that already holds a file.
+
+    The name is deterministic from (cwd, alias, stamp), so a second handoff on
+    the same day — or any tooling that guesses the same name — would silently
+    overwrite the first. That doc is git-excluded, so an overwrite is
+    unrecoverable except from the transcript of whoever last read it. Happened
+    once, 2026-08-10. A numbered variant costs nothing and loses nothing."""
+    base = os.path.join(cwd, "scratchpad", f"{stamp}-handoff-{alias}")
+    candidate = f"{base}.md"
+    n = 2
+    while os.path.exists(candidate):
+        candidate = f"{base} ({n}).md"
+        n += 1
+    return candidate
 
 def vault_path(alias: str, stamp: str, vault: str = None) -> str:
     """Where the archive copy lands, avoiding same-day collisions the way
@@ -56,13 +69,20 @@ def publish_vault(path: str) -> bool:
     except (OSError, subprocess.SubprocessError):
         return False
 
-def write_doc(path: str, alias: str, note: str, body: str) -> None:
+def write_doc(path: str, alias: str, note: str, body: str,
+              summary: str = None) -> None:
+    """The successor's single source. Carries both texts, so the briefing
+    needs one path and the summary does not depend on the vault write, which
+    happens after the spawn."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         fh.write(f"# Handoff — {alias}\n\n")
         fh.write(f"**Nota da sessão anterior:** {note}\n\n")
         fh.write("## Estado\n\n")
         fh.write(body.rstrip() + "\n")
+        if summary:
+            fh.write("\n## O que aconteceu na sessão anterior\n\n")
+            fh.write(summary.rstrip() + "\n")
 
 def run(alias: str, body: str, stamp: str, spawn_fn=None, summary: str = None) -> str:
     """`body` is forward-looking: what the successor needs to continue.
@@ -85,10 +105,11 @@ def run(alias: str, body: str, stamp: str, spawn_fn=None, summary: str = None) -
                   f"Abra o diretório uma vez manualmente e tente de novo.")
             raise SystemExit(2)
     path = doc_path(cwd, alias, stamp)
-    write_doc(path, alias, entry.get("note", ""), body)
+    write_doc(path, alias, entry.get("note", ""), body, summary=summary)
 
     briefing = (f"Você é o novo `{alias}`, substituindo a sessão anterior por handoff "
-                f"de contexto. Leia {path}, depois rode `comms open {alias}` e arme a "
+                f"de contexto. Leia {path} — ele traz o estado atual e o que aconteceu "
+                f"na sessão anterior. Depois rode `comms open {alias}` e arme a "
                 f"campainha com `comms wait` em background.")
     if spawn_fn is None:
         from comms import ghostty

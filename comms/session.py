@@ -38,8 +38,8 @@ def successor_name(current: str) -> str:
 
     The old session keeps its name — the client owns that and will not read a
     change from disk — so the new one is marked instead. Re-handing-off an
-    already-suffixed name must not stack `-novo-novo`.
+    already-suffixed name must not stack `-NOVO-NOVO`.
     """
     if not current:
         return ""
-    return current if current.endswith("-novo") else f"{current}-novo"
+    return current if current.endswith("-NOVO") else f"{current}-NOVO"

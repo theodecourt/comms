@@ -44,12 +44,12 @@ class SessionNameTest(unittest.TestCase):
 
     def test_successor_gets_the_novo_suffix(self):
         from comms import session
-        self.assertEqual(session.successor_name("ORCH"), "ORCH-novo")
+        self.assertEqual(session.successor_name("ORCH"), "ORCH-NOVO")
 
     def test_successor_suffix_does_not_stack(self):
-        # handing off twice must not produce ORCH-novo-novo
+        # handing off twice must not produce ORCH-NOVO-NOVO
         from comms import session
-        self.assertEqual(session.successor_name("ORCH-novo"), "ORCH-novo")
+        self.assertEqual(session.successor_name("ORCH-NOVO"), "ORCH-NOVO")
 
     def test_successor_of_nothing_is_nothing(self):
         from comms import session
