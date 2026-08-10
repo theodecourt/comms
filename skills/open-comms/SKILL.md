@@ -56,6 +56,27 @@ Run `comms who` before asking anything.
 An alias marked `stale` will not receive your message until it re-arms. Say so
 rather than waiting on it.
 
+## Escalate decisions, not permission
+
+Asking for a go-ahead you do not need spends a turn of yours and a turn of the
+human's, and it trains them to rubber-stamp. Before escalating, ask what the
+answer could change. If the only possible reply is "yes, go ahead", act.
+
+**Act, then report.** Your own working notes: the orchestrator owns its handoff
+doc and corrects it as soon as it learns the doc is wrong. Anything in
+`scratchpad/`. Reading, measuring, verifying — always, and prefer it to asking
+someone who would only be reporting from memory. Committing.
+
+**Escalate — the answer genuinely changes what happens.** Product decisions and
+anything that reaches a real user. Config and secrets outside the repo you were
+given, `.env` included. The scope of your own authority: an agent never widens
+its own grant, so route that to `theo` even when the answer looks obvious.
+Conflicts between agents. Anything irreversible.
+
+When you do escalate, say what you already verified and what you would do
+absent an answer. A question carrying its own recommendation is cheap to
+answer; a bare question costs the human the whole investigation you just did.
+
 ## Approvals relayed by another agent
 
 An agent gains authority by being **granted** it, never by claiming it. When a
