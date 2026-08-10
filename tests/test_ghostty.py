@@ -137,5 +137,61 @@ class GhosttyScriptTest(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_window_for_cwd_falls_back_to_the_nearest_ancestor(self):
+        # A session working in <repo>/scratchpad/foo belongs in the window
+        # already open on <repo> — exact-match-only gave every such session
+        # its own window (observed 2026-08-10 with the `ai` session).
+        from comms import ghostty
+        rows = [{"window": "w-repo", "terminal": "t1",
+                 "cwd": "/Users/theo/segura/segura-intelligence", "selected": True}]
+        self.assertEqual(
+            ghostty.window_for_cwd(
+                "/Users/theo/segura/segura-intelligence/scratchpad/helena", rows),
+            "w-repo")
+
+    def test_window_for_cwd_prefers_the_deepest_ancestor(self):
+        from comms import ghostty
+        rows = [{"window": "w-shallow", "terminal": "t1", "cwd": "/Users/theo/segura",
+                 "selected": True},
+                {"window": "w-deep", "terminal": "t2",
+                 "cwd": "/Users/theo/segura/segura-api", "selected": True}]
+        self.assertEqual(
+            ghostty.window_for_cwd("/Users/theo/segura/segura-api/app", rows), "w-deep")
+
+    def test_window_for_cwd_does_not_match_a_sibling_sharing_a_prefix(self):
+        # "/a/segura-api" must not be treated as an ancestor of
+        # "/a/segura-api-experiments" just because the string starts the same.
+        from comms import ghostty
+        rows = [{"window": "w1", "terminal": "t1", "cwd": "/a/segura-api",
+                 "selected": True}]
+        self.assertIsNone(ghostty.window_for_cwd("/a/segura-api-experiments", rows))
+
+    def test_exact_match_still_wins(self):
+        from comms import ghostty
+        rows = [{"window": "w-parent", "terminal": "t1", "cwd": "/a", "selected": True},
+                {"window": "w-exact", "terminal": "t2", "cwd": "/a/b", "selected": True}]
+        self.assertEqual(ghostty.window_for_cwd("/a/b", rows), "w-exact")
+
+    def test_list_script_does_not_use_a_bare_tab_separator(self):
+        # Inside `tell application "Ghostty"` the word `tab` resolves to
+        # Ghostty's own tab CLASS, not the AppleScript tab character: the
+        # script emitted the literal text "tab", every row failed to parse,
+        # list_terminals() returned empty, and every spawn silently opened a
+        # new window with no focus restore. Measured 2026-08-10.
+        from comms import ghostty
+        import re
+        self.assertIsNone(re.search(r"&\s*tab\s*&", ghostty.LIST_SCRIPT),
+                          "LIST_SCRIPT voltou a usar `tab` como separador")
+        self.assertIn('"|:|"', ghostty.LIST_SCRIPT)
+
+    def test_list_terminals_parses_the_separator_it_emits(self):
+        # Guards the parser and the script against drifting apart.
+        from comms import ghostty
+        row = "w1|:|t1|:|/a/b|:|1|:|wfront"
+        with mock.patch.object(ghostty, "_osascript", return_value=(True, row)):
+            parsed = ghostty.list_terminals()
+        self.assertEqual(parsed, [{"window": "w1", "terminal": "t1", "cwd": "/a/b",
+                                   "selected": True, "front_window": "wfront"}])
+
 if __name__ == "__main__":
     unittest.main()

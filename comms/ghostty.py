@@ -2,6 +2,12 @@
 on 2026-08-01 — see docs/specs §10.2 before changing any of them."""
 import json, os, subprocess, tempfile
 
+# Fields are separated by "|:|", not by `tab`. Inside `tell application
+# "Ghostty"` the word `tab` resolves to Ghostty's own tab CLASS, not to the
+# AppleScript tab character, so the script emitted the literal text "tab" and
+# every row failed to parse — list_terminals() returned empty, which silently
+# made every spawn open a new window and skipped focus restore entirely.
+# Measured 2026-08-10. Do not reintroduce a bare `tab` here.
 LIST_SCRIPT = """
 tell application "Ghostty"
     if it is not running then return ""
@@ -13,8 +19,8 @@ tell application "Ghostty"
                 set t to focused terminal of tb
                 set sel to "0"
                 if selected of tb then set sel to "1"
-                set out to out & (id of w) & tab & (id of t) & tab & ¬
-                    (working directory of t) & tab & sel & tab & fw & linefeed
+                set out to out & (id of w) & "|:|" & (id of t) & "|:|" & ¬
+                    (working directory of t) & "|:|" & sel & "|:|" & fw & linefeed
             end try
         end repeat
     end repeat
@@ -54,7 +60,7 @@ def list_terminals() -> list:
         return []
     out = []
     for line in output.splitlines():
-        parts = line.split("\t")
+        parts = line.split("|:|")
         if len(parts) < 5:
             continue
         out.append({"window": parts[0], "terminal": parts[1], "cwd": parts[2],
@@ -62,12 +68,31 @@ def list_terminals() -> list:
     return out
 
 def window_for_cwd(cwd: str, rows: list = None):
-    """Match by working directory. Never by index — window order follows focus."""
+    """Window to open the new tab in, matched by working directory.
+
+    Never by index — window order follows focus and shifts between calls.
+
+    An exact match is preferred, then the nearest ancestor: a session working
+    in `<repo>/scratchpad/foo` belongs in the window already open on `<repo>`,
+    which is what "one window per repo" means in practice. Without the
+    ancestor fallback every session running below the repo root got its own
+    window (observed 2026-08-10 with the `ai` session). Only when no window
+    sits on the directory or above it is a new window the right answer.
+    """
     rows = list_terminals() if rows is None else rows
+    target = os.path.realpath(cwd)
+    best, best_len = None, -1
     for row in rows:
-        if row["cwd"] == cwd:
+        row_dir = os.path.realpath(row["cwd"]) if row["cwd"] else ""
+        if not row_dir:
+            continue
+        if row_dir == target:
             return row["window"]
-    return None
+        # os.path.commonpath would match siblings sharing a prefix string;
+        # the separator check keeps this to genuine ancestors.
+        if target.startswith(row_dir.rstrip(os.sep) + os.sep) and len(row_dir) > best_len:
+            best, best_len = row["window"], len(row_dir)
+    return best
 
 def shell_quote(s: str) -> str:
     """Wrap for a POSIX shell single-quoted argument."""
