@@ -1,6 +1,6 @@
 """Drives Ghostty over AppleScript. The constraints encoded here were measured
 on 2026-08-01 — see docs/specs §10.2 before changing any of them."""
-import subprocess
+import os, subprocess, tempfile
 
 LIST_SCRIPT = """
 tell application "Ghostty"
@@ -69,10 +69,33 @@ def window_for_cwd(cwd: str, rows: list = None):
             return row["window"]
     return None
 
+def shell_quote(s: str) -> str:
+    """Wrap for a POSIX shell single-quoted argument."""
+    return "'" + s.replace("'", "'\\''") + "'"
+
+def _briefing_launch(briefing: str) -> str:
+    """Write the briefing to a UTF-8 file and return a pure-ASCII shell line
+    that reads it, deletes it, and launches claude with it. Ghostty mangles
+    non-ASCII in `initial input`; only ASCII may cross that boundary."""
+    fd, path = tempfile.mkstemp(prefix="comms-brief-", suffix=".txt")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(briefing)
+    q = shell_quote(path)
+    return f'B=$(cat {q}); rm -f {q}; claude "$B"'
+
 def build_spawn_script(cwd, command, initial_input, env, window) -> str:
     env_list = ", ".join(f'"{_esc(e)}"' for e in env)
+    # `command` is deliberately omitted when falsy. Ghostty runs a configured
+    # `command` through `/usr/bin/login -flp <user> /bin/bash --noprofile
+    # --norc -c exec -l <command>` — measured 2026-08-10 from a failed spawn.
+    # `--noprofile --norc` means the process gets no shell profile, so PATH
+    # lacks ~/.local/bin: `claude` is not found, AND a session launched that
+    # way could not run `comms` either. Omitting `command` gets Ghostty's
+    # default shell, which IS a login shell (measured: `$0` == `-/bin/zsh`),
+    # so the launch belongs in `initial input` instead.
+    command_field = f'command:"{_esc(command)}", ' if command else ""
     cfg = (f'{{initial working directory:"{_esc(cwd)}", '
-           f'command:"{_esc(command)}", '
+           f'{command_field}'
            f'environment variables:{{{env_list}}}, '
            f'initial input:"{_esc(initial_input)}" & linefeed}}')
     # Target the window by its stable `id`, never by index — window order
@@ -112,7 +135,17 @@ def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     env = [f"COMMS_ALIAS={alias}"]
     if role:
         env.append(f"COMMS_ROLE={role}")
-    ok, _ = _osascript(build_spawn_script(cwd, "claude", briefing, env, window))
+    # No `command` — the login shell launches claude from `initial input`, so
+    # the session inherits a real PATH (see build_spawn_script for why).
+    #
+    # The briefing goes through a file rather than inline, because Ghostty's
+    # `initial input` re-encodes what it types: UTF-8 bytes are read as
+    # Latin-1 and encoded again, so "ê" (c3 aa) arrives as c3 83 c2 aa.
+    # Measured 2026-08-10 against a real spawn. Keeping the launch line pure
+    # ASCII sidesteps it — Python writes the file as UTF-8 and the shell
+    # reads it back intact.
+    launch = _briefing_launch(briefing)
+    ok, _ = _osascript(build_spawn_script(cwd, None, launch, env, window))
     if window and prev_terminal and front:
         # Separate invocation on purpose: `select tab` issued right after
         # `new tab` in the same script is silently ignored, even with a
