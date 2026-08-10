@@ -1,7 +1,7 @@
 """Replace a session that is running out of context, keeping its alias."""
 import os
 import subprocess
-from comms import messages, presence, session
+from comms import messages, presence
 
 def vault_root() -> str:
     """Where archive notes land. Overridable with COMMS_VAULT so tests never
@@ -114,12 +114,8 @@ def run(alias: str, body: str, stamp: str, spawn_fn=None, summary: str = None) -
     if spawn_fn is None:
         from comms import ghostty
         spawn_fn = ghostty.spawn
-    # The old session keeps its name — the client owns that and does not read a
-    # change from disk (verified 2026-08-10). The successor is marked instead.
-    old_name = session.name_for(entry.get("session", ""))
     spawned = spawn_fn(alias=alias, cwd=cwd, briefing=briefing,
-                        role=presence.role_for(alias),
-                        name=session.successor_name(old_name or ""))
+                        role=presence.role_for(alias))
     # spawn_fn may be a test stub that returns None (does not report) — only
     # an explicit False means the spawn is known to have failed. Losing the
     # successor here would leave the board with no orchestrator at all, so

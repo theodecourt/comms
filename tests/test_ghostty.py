@@ -129,11 +129,10 @@ class GhosttyScriptTest(unittest.TestCase):
         from comms import ghostty
         line = ghostty._briefing_launch("Você é ção — ok")
         self.assertTrue(line.isascii())
-        path = re.search(r"head -1 '([^']+)'", line).group(1)
+        path = re.search(r"cat '([^']+)'", line).group(1)
         try:
-            # first line is the display name (empty here), body follows
             with open(path, encoding="utf-8") as fh:
-                self.assertEqual(fh.read(), "\nVocê é ção — ok")
+                self.assertEqual(fh.read(), "Você é ção — ok")
         finally:
             os.unlink(path)
 

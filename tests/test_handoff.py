@@ -94,16 +94,6 @@ class HandoffTest(unittest.TestCase):
             handoff.run("orch", "segundo", "2026-08-10", spawn_fn=lambda **kw: True)
         self.assertEqual(len([f for f in os.listdir(vault) if f.endswith(".md")]), 2)
 
-    def test_successor_is_named_with_novo(self):
-        from comms import handoff
-        from unittest import mock
-        seen = {}
-        with mock.patch("comms.session.name_for", return_value="ORCH-COLETA"), \
-             redirect_stdout(io.StringIO()):
-            handoff.run("orch", "estado", "2026-08-10",
-                        spawn_fn=lambda **kw: seen.update(kw) or True)
-        self.assertEqual(seen["name"], "ORCH-COLETA-NOVO")
-
     def test_summary_goes_to_the_vault_and_state_to_the_successor(self):
         from comms import handoff
         vault = os.environ["COMMS_VAULT"]

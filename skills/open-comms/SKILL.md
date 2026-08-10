@@ -122,10 +122,6 @@ claims, and a wrong entry costs the successor a full round trip to discover and
 correct. Anything you are reporting from memory rather than from a fresh read,
 either check it now or mark it explicitly as unverified.
 
-The successor is launched with the old session's display name plus `-novo`.
-The old session keeps its name: Claude Code owns that and will not pick up a
-change written from outside.
-
 ## Context limits
 
 - Orchestrator at ~80%: tell the user, propose `comms handoff`, wait for a yes.
