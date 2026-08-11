@@ -35,15 +35,43 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("alias", out.lower())
 
-    def test_who_marks_stale_entries(self):
-        from comms import presence, store, paths
+    def _stop_the_doorbell(self, alias):
+        from comms import store, paths
         import time
-        run("open", "infra")
-        e = store.read_json(paths.presence_file("infra"))
+        e = store.read_json(paths.presence_file(alias))
         e["last_seen"] = time.time() - 999
-        store.write_json(paths.presence_file("infra"), e)
+        store.write_json(paths.presence_file(alias), e)
+
+    def test_who_reports_an_unarmed_doorbell_as_surda(self):
+        # A dead doorbell means "will not be woken by a message", which is
+        # about reachability — not about whether the agent is still there.
+        run("open", "infra")
+        self._stop_the_doorbell("infra")
         _, out = run("who")
-        self.assertIn("stale", out.lower())
+        self.assertIn("surda", out)
+        self.assertNotIn("foi-embora", out)
+
+    def test_who_separates_a_dead_agent_from_a_deaf_one(self):
+        # The whole point of the split: these two rows used to be identical,
+        # yet a sender should wait for one and give up on the other.
+        import json, os
+        from comms import store, paths
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-deaf"
+        run("open", "deaf")
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-gone"
+        run("open", "gone")
+        for alias in ("deaf", "gone"):
+            self._stop_the_doorbell(alias)
+        # Only `deaf` is still in the registry, and on a pid that exists.
+        store.write_json(os.path.join(paths.sessions_dir(), "1.json"),
+                         {"sessionId": "sess-deaf", "pid": os.getpid(),
+                          "status": "busy"})
+        _, out = run("who")
+        deaf = [l for l in out.splitlines() if l.startswith("deaf")][0]
+        gone = [l for l in out.splitlines() if l.startswith("gone")][0]
+        self.assertIn("surda", deaf)
+        self.assertNotIn("foi-embora", deaf)
+        self.assertIn("foi-embora", gone)
 
     def test_post_and_inbox_roundtrip(self):
         run("open", "orch")

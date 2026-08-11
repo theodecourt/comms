@@ -92,5 +92,55 @@ class PresenceTest(unittest.TestCase):
         from comms import presence
         self.assertIsNone(presence.whoami())
 
+    def _registry(self, *records):
+        from comms import paths, store
+        for i, rec in enumerate(records):
+            store.write_json(os.path.join(paths.sessions_dir(), f"{i}.json"), rec)
+
+    def test_liveness_is_unknown_when_the_registry_is_absent(self):
+        # Never read a missing registry as "everybody is dead" — comms has to
+        # keep working on a machine or a terminal that has no such thing.
+        from comms import presence
+        presence.open("infra", session="sess-1")
+        self.assertIsNone(presence.read_all()[0]["live"])
+
+    def test_live_and_native_status_come_from_the_registry(self):
+        from comms import presence
+        presence.open("infra", session="sess-1")
+        self._registry({"sessionId": "sess-1", "pid": os.getpid(),
+                        "status": "busy"})
+        entry = presence.read_all()[0]
+        self.assertIs(entry["live"], True)
+        self.assertEqual(entry["native_status"], "busy")
+
+    def test_a_session_missing_from_a_readable_registry_is_gone(self):
+        from comms import presence
+        presence.open("infra", session="sess-gone")
+        self._registry({"sessionId": "sess-other", "pid": os.getpid(),
+                        "status": "idle"})
+        self.assertIs(presence.read_all()[0]["live"], False)
+
+    def test_a_registered_session_on_a_dead_pid_is_gone(self):
+        from comms import presence
+        presence.open("infra", session="sess-1")
+        self._registry({"sessionId": "sess-1", "pid": 2 ** 31 - 1,
+                        "status": "busy"})
+        self.assertIs(presence.read_all()[0]["live"], False)
+
+    def test_an_agent_without_a_session_id_is_unknown_not_dead(self):
+        # Joining without CLAUDE_CODE_SESSION_ID leaves nothing to join on.
+        # Guessing "dead" there would evict a healthy agent from the board.
+        from comms import presence
+        presence.open("infra", session="")
+        self._registry({"sessionId": "sess-other", "pid": os.getpid(),
+                        "status": "idle"})
+        self.assertIsNone(presence.read_all()[0]["live"])
+
+    def test_liveness_never_reads_the_real_session_registry(self):
+        # COMMS_ROOT drags the registry path with it; if this ever regresses,
+        # the suite starts depending on which sessions are open on the machine.
+        from comms import paths
+        self.assertTrue(paths.sessions_dir().startswith(self.tmp))
+
 if __name__ == "__main__":
     unittest.main()

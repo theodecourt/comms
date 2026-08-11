@@ -53,8 +53,16 @@ Run `comms who` before asking anything.
 - Scope, priority, conflict between agents, change of plan → `orch`.
 - Product decision, spend, anything irreversible → `theo`.
 
-An alias marked `stale` will not receive your message until it re-arms. Say so
-rather than waiting on it.
+`comms who` answers two separate questions, because they call for opposite
+responses:
+
+- **CAMPAINHA `surda`** — alive, but its doorbell is not armed. Your message
+  lands in its inbox and sits there until it re-arms. Post anyway, then say you
+  are not expecting a prompt reply.
+- **ESTADO `foi-embora`** — the session is gone. Nothing you post will ever be
+  read. Do not wait on it; take it to `theo` or to `orch`.
+
+`ESTADO` otherwise shows what the agent last reported it was doing.
 
 ## Escalate decisions, not permission
 

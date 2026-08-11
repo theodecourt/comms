@@ -47,11 +47,25 @@ def close(alias: str) -> None:
         pass
 
 def read_all() -> list:
+    """Every board entry, enriched with two INDEPENDENT facts.
+
+    `stale` (unchanged) means the doorbell is not running — the agent will not
+    be woken by a message until it re-arms. `live` means the process is still
+    there, and comes from Claude Code's own registry rather than from our
+    heartbeat.
+
+    Keeping them apart is the point: "alive but deaf" and "gone" used to be the
+    same row on the board, yet they call for opposite actions from a sender —
+    wait for the agent to re-arm, versus stop waiting and tell the human.
+    `live` is None whenever it genuinely cannot be known, and no caller may
+    read None as False."""
     out = []
     try:
         names = sorted(os.listdir(paths.presence_dir()))
     except OSError:
         return out
+    from comms import native
+    registry = native.sessions()
     now = time.time()
     for name in names:
         if not name.endswith(".json"):
@@ -60,6 +74,17 @@ def read_all() -> list:
         if entry is None:
             continue
         entry["stale"] = (now - entry.get("last_seen", 0)) > TTL
+        session = entry.get("session")
+        record = registry.get(session) if session else None
+        if record is not None:
+            entry["live"] = native.pid_alive(record.get("pid"))
+            entry["native_status"] = record.get("status")
+        else:
+            # Absent registry, or an agent that joined without
+            # CLAUDE_CODE_SESSION_ID: unknown, not dead. Only a readable
+            # registry that does not list a known session proves it is gone.
+            entry["live"] = False if (registry and session) else None
+            entry["native_status"] = None
         out.append(entry)
     return out
 

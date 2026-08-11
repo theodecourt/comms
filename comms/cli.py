@@ -25,6 +25,24 @@ def cmd_open(args) -> int:
     print(f"{e['alias']} aberto como {e['role']}")
     return 0
 
+def _state(e) -> str:
+    """What the agent is doing — or that it is no longer there.
+
+    `live is False` outranks the agent's own last self-report, which is frozen
+    at whatever it wrote before dying."""
+    if e.get("live") is False:
+        return "foi-embora"
+    return e.get("status", "?")
+
+def _bell(e) -> str:
+    """Whether a message would actually wake this agent.
+
+    Its own column because it is orthogonal to `_state`: an agent can be alive
+    and working yet unreachable, and the two call for opposite responses."""
+    if e.get("live") is False:
+        return "—"
+    return "surda" if e["stale"] else "armada"
+
 def cmd_who(args) -> int:
     from comms import delegation
     entries = presence.read_all()
@@ -32,11 +50,11 @@ def cmd_who(args) -> int:
     if not entries and not grants:
         print("ninguém no board")
         return 0
-    print(f"{'ALIAS':<10} {'PAPEL':<13} {'ESTADO':<14} {'VISTO':<10} NOTA")
+    print(f"{'ALIAS':<10} {'PAPEL':<13} {'ESTADO':<14} {'CAMPAINHA':<10} "
+          f"{'VISTO':<10} NOTA")
     for e in entries:
-        status = "stale" if e["stale"] else e.get("status", "?")
-        print(f"{e['alias']:<10} {e.get('role',''):<13} {status:<14} "
-              f"{_age(e.get('last_seen', 0)):<10} {e.get('note','')}")
+        print(f"{e['alias']:<10} {e.get('role',''):<13} {_state(e):<14} "
+              f"{_bell(e):<10} {_age(e.get('last_seen', 0)):<10} {e.get('note','')}")
     if grants:
         # Printed as its own block, not a column: an approval relayed by an
         # agent is only actionable if it falls inside one of these scopes.
