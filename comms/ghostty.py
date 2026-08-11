@@ -98,15 +98,23 @@ def shell_quote(s: str) -> str:
     """Wrap for a POSIX shell single-quoted argument."""
     return "'" + s.replace("'", "'\\''") + "'"
 
-def _briefing_launch(briefing: str) -> str:
+def _briefing_launch(briefing: str, alias: str = None) -> str:
     """Write the briefing to a UTF-8 file and return a pure-ASCII shell line
     that reads it, deletes it, and launches claude with it. Ghostty mangles
-    non-ASCII in `initial input`; only ASCII may cross that boundary."""
+    non-ASCII in `initial input`; only ASCII may cross that boundary.
+
+    `claude -n <alias>` names the native session after the comms alias. Without
+    it Claude Code auto-names the session after its directory (`comms-9d`), so
+    `ListAgents` and `comms who` disagreed on what to call the same agent and
+    no peer could address it by the name the board uses. The alias is validated
+    by presence.valid_alias() before spawn, so it is ASCII by construction —
+    still quoted, because a launch line is not the place to rely on that."""
     fd, path = tempfile.mkstemp(prefix="comms-brief-", suffix=".txt")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(briefing)
     q = shell_quote(path)
-    return f'B=$(cat {q}); rm -f {q}; claude "$B"'
+    name = f"-n {shell_quote(alias)} " if alias else ""
+    return f'B=$(cat {q}); rm -f {q}; claude {name}"$B"'
 
 def build_spawn_script(cwd, command, initial_input, env, window) -> str:
     env_list = ", ".join(f'"{_esc(e)}"' for e in env)
@@ -185,7 +193,7 @@ def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     # Measured 2026-08-10 against a real spawn. Keeping the launch line pure
     # ASCII sidesteps it — Python writes the file as UTF-8 and the shell
     # reads it back intact.
-    launch = _briefing_launch(briefing)
+    launch = _briefing_launch(briefing, alias)
     ok, _ = _osascript(build_spawn_script(cwd, None, launch, env, window))
     if window and prev_terminal and front:
         # Separate invocation on purpose: `select tab` issued right after

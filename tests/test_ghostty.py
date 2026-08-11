@@ -108,7 +108,23 @@ class GhosttyScriptTest(unittest.TestCase):
         script = spawn_scripts[0]
         self.assertNotIn("command:", script)
         # the double quotes are AppleScript-escaped by the time they land here
-        self.assertIn('claude \\"$B\\"', script)
+        self.assertIn('claude -n \'front\' \\"$B\\"', script)
+
+    def test_spawn_names_the_native_session_after_the_alias(self):
+        # Without -n, Claude Code auto-names the session after its directory
+        # (measured: a `probe` spawned in ~/comms came up as `comms-9d`), so
+        # ListAgents and `comms who` named the same agent differently and no
+        # peer could address it by the alias the board shows.
+        from comms import ghostty
+        line = ghostty._briefing_launch("leia o plano", "front")
+        self.assertIn("claude -n 'front' \"$B\"", line)
+        self.assertTrue(line.isascii())
+
+    def test_spawn_without_an_alias_omits_the_name_flag(self):
+        from comms import ghostty
+        line = ghostty._briefing_launch("leia o plano")
+        self.assertNotIn(" -n ", line)
+        self.assertIn('claude "$B"', line)
 
     def test_accented_briefing_never_reaches_the_applescript(self):
         # Ghostty's `input text` reads UTF-8 bytes as Latin-1 and re-encodes:
