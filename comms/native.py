@@ -16,30 +16,46 @@ Everything here is read-only and optional. Every function degrades to "unknown"
 rather than raising, so comms keeps working unchanged where the registry is
 absent: another terminal, a future layout, a machine without it.
 """
-import os
-from comms import paths, store
+import json, os
+from comms import paths
 
 
 def sessions() -> dict:
     """sessionId -> registry record, for every live session.
 
-    Returns {} when the registry cannot be read at all, which callers must read
-    as "unknown", never as "nobody is alive"."""
+    Returns {} both when the registry cannot be read at all AND when any one
+    file in it fails to parse as JSON — callers must read either as "unknown",
+    never as "nobody is alive". The second case matters if Claude Code's
+    write of <pid>.json is not known to be atomic: a `comms who` landing
+    mid-write would otherwise see a half-written file, skip only THAT record,
+    and report every other session with full confidence — including treating
+    the mid-write session itself as gone, since its absence from an otherwise
+    "readable" registry would look like proof. One bad file has to cost the
+    whole answer, not just its own row."""
     out = {}
     try:
         names = os.listdir(paths.sessions_dir())
     except OSError:
         return out
+    degraded = False
     for name in names:
         if not name.endswith(".json"):
             continue
-        rec = store.read_json(os.path.join(paths.sessions_dir(), name))
+        path = os.path.join(paths.sessions_dir(), name)
+        try:
+            with open(path) as fh:
+                rec = json.load(fh)
+        except OSError:
+            continue                  # vanished between listdir and open — not corruption
+        except json.JSONDecodeError:
+            degraded = True
+            continue
         if not isinstance(rec, dict):
             continue
         sid = rec.get("sessionId")
         if sid:
             out[sid] = rec
-    return out
+    return {} if degraded else out
 
 
 def pid_alive(pid) -> bool:
@@ -54,3 +70,19 @@ def pid_alive(pid) -> bool:
     except (OSError, TypeError, ValueError):
         return False
     return True
+
+
+def liveness(pid):
+    """Tri-state: True/False when `pid` is real, None when there is nothing to ask.
+
+    A registry record missing `pid`, or holding something that is not one, is
+    not evidence of death — it is a record with a gap in it, and the session
+    it names may well still be there. Only a real pid that fails the kill(0)
+    probe counts as dead; presence.read_all() must see that difference rather
+    than have pid_alive's own `except TypeError/ValueError: False` blur it
+    into "gone"."""
+    try:
+        int(pid)
+    except (TypeError, ValueError):
+        return None
+    return pid_alive(pid)

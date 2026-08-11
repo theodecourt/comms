@@ -127,6 +127,28 @@ class PresenceTest(unittest.TestCase):
                         "status": "busy"})
         self.assertIs(presence.read_all()[0]["live"], False)
 
+    def test_a_registered_session_with_no_usable_pid_is_unknown(self):
+        # The record exists — that is itself evidence the session is there —
+        # but it carries no pid comms can ask the OS about. Reading that as
+        # "dead" would be worse than not asking at all.
+        from comms import presence
+        presence.open("infra", session="sess-1")
+        self._registry({"sessionId": "sess-1", "pid": None, "status": "busy"})
+        self.assertIsNone(presence.read_all()[0]["live"])
+
+    def test_a_corrupt_file_elsewhere_in_the_registry_does_not_mark_this_session_dead(self):
+        # Claude Code's write of <pid>.json is not known to be atomic. A
+        # `comms who` landing mid-write on some OTHER session's file must not
+        # let this session's own, perfectly readable record be trusted as
+        # proof of anything — the whole registry read degrades to unknown.
+        from comms import presence, paths
+        presence.open("infra", session="sess-1")
+        self._registry({"sessionId": "sess-1", "pid": os.getpid(),
+                        "status": "busy"})
+        with open(os.path.join(paths.sessions_dir(), "half-written.json"), "w") as fh:
+            fh.write('{"sessionId": "sess-2"')
+        self.assertIsNone(presence.read_all()[0]["live"])
+
     def test_an_agent_without_a_session_id_is_unknown_not_dead(self):
         # Joining without CLAUDE_CODE_SESSION_ID leaves nothing to join on.
         # Guessing "dead" there would evict a healthy agent from the board.

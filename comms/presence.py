@@ -77,7 +77,7 @@ def read_all() -> list:
         session = entry.get("session")
         record = registry.get(session) if session else None
         if record is not None:
-            entry["live"] = native.pid_alive(record.get("pid"))
+            entry["live"] = native.liveness(record.get("pid"))
             entry["native_status"] = record.get("status")
             entry["native_name"] = record.get("name") or None
         else:
