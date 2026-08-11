@@ -79,12 +79,14 @@ def read_all() -> list:
         if record is not None:
             entry["live"] = native.pid_alive(record.get("pid"))
             entry["native_status"] = record.get("status")
+            entry["native_name"] = record.get("name") or None
         else:
             # Absent registry, or an agent that joined without
             # CLAUDE_CODE_SESSION_ID: unknown, not dead. Only a readable
             # registry that does not list a known session proves it is gone.
             entry["live"] = False if (registry and session) else None
             entry["native_status"] = None
+            entry["native_name"] = None
         out.append(entry)
     return out
 

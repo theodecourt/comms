@@ -174,6 +174,18 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("nunca foi aberto", out)
 
+    def test_who_shows_the_native_name_for_addressing(self):
+        # É por esse nome que o agente endereça o SendMessage; sem ele o board
+        # diz com quem falar e não diz como.
+        from comms import store, paths
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-front"
+        run("open", "front")
+        store.write_json(os.path.join(paths.sessions_dir(), "1.json"),
+                         {"sessionId": "sess-front", "pid": os.getpid(),
+                          "status": "busy", "name": "front-tab"})
+        _, out = run("who")
+        self.assertIn("front-tab", out)
+
 
 if __name__ == "__main__":
     unittest.main()

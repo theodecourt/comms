@@ -55,10 +55,11 @@ def cmd_who(args) -> int:
         print("ninguém no board")
         return 0
     print(f"{'ALIAS':<10} {'PAPEL':<13} {'ESTADO':<14} {'CAMPAINHA':<10} "
-          f"{'VISTO':<10} NOTA")
+          f"{'NOME NATIVO':<22} {'VISTO':<10} NOTA")
     for e in entries:
         print(f"{e['alias']:<10} {e.get('role',''):<13} {_state(e):<14} "
-              f"{_bell(e):<10} {_age(e.get('last_seen', 0)):<10} {e.get('note','')}")
+              f"{_bell(e):<10} {(e.get('native_name') or '—'):<22} "
+              f"{_age(e.get('last_seen', 0)):<10} {e.get('note','')}")
     if grants:
         # Printed as its own block, not a column: an approval relayed by an
         # agent is only actionable if it falls inside one of these scopes.

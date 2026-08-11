@@ -142,5 +142,17 @@ class PresenceTest(unittest.TestCase):
         from comms import paths
         self.assertTrue(paths.sessions_dir().startswith(self.tmp))
 
+    def test_read_all_exposes_the_native_session_name(self):
+        from comms import presence
+        presence.open("infra", session="sess-1")
+        self._registry({"sessionId": "sess-1", "pid": os.getpid(),
+                        "status": "busy", "name": "infra"})
+        self.assertEqual(presence.read_all()[0]["native_name"], "infra")
+
+    def test_native_name_is_none_without_a_registry_match(self):
+        from comms import presence
+        presence.open("infra", session="sess-1")
+        self.assertIsNone(presence.read_all()[0]["native_name"])
+
 if __name__ == "__main__":
     unittest.main()
