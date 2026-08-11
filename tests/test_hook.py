@@ -105,7 +105,6 @@ class HookTest(unittest.TestCase):
 
     def test_installer_adds_the_sendmessage_hook_with_a_matcher(self):
         # Sem matcher o hook rodaria em TODA chamada de ferramenta.
-        import json, os, subprocess, sys, tempfile
         settings = os.path.join(self.tmp, "settings.json")
         with open(settings, "w") as fh:
             json.dump({"hooks": {}}, fh)
@@ -115,7 +114,8 @@ class HookTest(unittest.TestCase):
         p = subprocess.run([sys.executable, script], env=env,
                            capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr)
-        cfg = json.load(open(settings))
+        with open(settings) as fh:
+            cfg = json.load(fh)
         groups = cfg["hooks"]["PostToolUse"]
         self.assertTrue(any(g.get("matcher") == "SendMessage" for g in groups))
 

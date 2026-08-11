@@ -61,11 +61,26 @@ class SendMessageHookTest(unittest.TestCase):
         rec = messages.log("orch")[-1]
         self.assertTrue(rec["off_board"])
         self.assertEqual(rec["to"], "alguma-sessao")
+        self.assertEqual(messages.log("alguma-sessao"), [])
 
     def test_a_sender_outside_the_board_records_nothing(self):
         from comms import messages
         self._run(self._payload("builder [24374e]", session="sess-desconhecida"))
         self.assertEqual(messages.log("builder"), [])
+
+    def test_sender_resolution_prefers_comms_alias_over_session_lookup(self):
+        # Toda sessão nascida de `comms spawn` chega com COMMS_ALIAS — esse É
+        # o caminho de produção — mas _run() remove a variável de propósito
+        # para manter test_a_sender_outside_the_board_records_nothing honesto.
+        # Sem este teste, ninguém exercita a preferência por COMMS_ALIAS.
+        from comms import messages
+        env = dict(os.environ, COMMS_ROOT=self.tmp, COMMS_ALIAS="orch")
+        p = subprocess.run([sys.executable, HOOK],
+                           input=json.dumps(self._payload("builder [24374e]",
+                                                           session="sess-desconhecida")),
+                           text=True, capture_output=True, env=env)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(messages.log("orch")[-1]["to"], "builder")
 
     def test_another_tool_is_ignored(self):
         from comms import messages
