@@ -57,9 +57,6 @@ Run `comms who` before asking anything.
 - Scope, priority, conflict between agents, change of plan → `orch`.
 - Product decision, spend, anything irreversible → `theo`.
 
-`comms who` answers two separate questions, because they call for opposite
-responses:
-
 ## Sending: native first, comms when it fails
 
 Send with `SendMessage`. Run `comms who` to choose the alias, then `ListAgents`
@@ -77,6 +74,9 @@ Every send is recorded on the board automatically, without its body. A failed
 send you never followed up on shows in `comms log` as `⚠ NÃO ENTREGUE`.
 
 ## Reading the board
+
+`comms who` answers two separate questions, because they call for opposite
+responses:
 
 - **ESTADO `foi-embora`** — the session is gone. Nothing reaches it. Take it to
   `theo` or to `orch`.
