@@ -14,6 +14,22 @@ class DoorbellTest(unittest.TestCase):
         os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def test_sigterm_names_itself_instead_of_dying_silently(self):
+        # A reaped doorbell used to exit with nothing on stdout, and an empty
+        # output reads equally well as "re-arm" or as "this is broken, stop".
+        # The second reading is what left a real session deaf for hours.
+        import signal, subprocess, sys
+        env = dict(os.environ, COMMS_ROOT=self.tmp, COMMS_ALIAS="front")
+        p = subprocess.Popen(
+            [sys.executable, "-c",
+             "from comms.cli import main; raise SystemExit(main(['wait']))"],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            env=env, stdout=subprocess.PIPE, text=True)
+        time.sleep(1.0)                     # let it reach the polling loop
+        p.send_signal(signal.SIGTERM)
+        out, _ = p.communicate(timeout=10)
+        self.assertIn("DOORBELL: killed", out)
+
     def test_has_mail_false_when_inbox_empty(self):
         from comms import doorbell
         self.assertFalse(doorbell.has_mail("front"))

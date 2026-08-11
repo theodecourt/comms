@@ -24,6 +24,10 @@ user names you.
 The output holds a `DOORBELL:` line.
 
 - `DOORBELL: closed` → comms is off. Do **not** re-arm.
+- **No `DOORBELL:` line at all** — empty output, task reported as killed →
+  something outside comms reaped the process. This is the one case that looks
+  like a failure and is not. **Re-arm.** Stopping here is how a session goes
+  deaf for hours while still showing up on the board as available.
 - Otherwise:
   1. `comms inbox` — reads and consumes. Use `--peek` to look without consuming.
   2. Act on the messages (see Routing).
