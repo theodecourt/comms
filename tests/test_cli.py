@@ -73,6 +73,27 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("foi-embora", deaf)
         self.assertIn("foi-embora", gone)
 
+    def test_wait_is_bounded_by_default(self):
+        # An unbounded doorbell that gets reaped leaves an empty output the
+        # agent has to interpret; a bound makes the common case say why.
+        from unittest import mock
+        from comms import cli, doorbell
+        os.environ["COMMS_ALIAS"] = "orch"
+        run("open", "orch")
+        with mock.patch.object(doorbell, "wait", return_value="timeout") as w:
+            run("wait")
+        self.assertEqual(w.call_args.kwargs["max_seconds"],
+                         cli.DEFAULT_WAIT_SECONDS)
+
+    def test_wait_zero_restores_the_unbounded_wait(self):
+        from unittest import mock
+        from comms import cli, doorbell
+        os.environ["COMMS_ALIAS"] = "orch"
+        run("open", "orch")
+        with mock.patch.object(doorbell, "wait", return_value="mail") as w:
+            run("wait", "--max-seconds", "0")
+        self.assertIsNone(w.call_args.kwargs["max_seconds"])
+
     def test_post_and_inbox_roundtrip(self):
         run("open", "orch")
         run("open", "front")

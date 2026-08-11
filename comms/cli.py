@@ -2,6 +2,10 @@
 import argparse, os, sys, time
 from comms import messages, presence
 
+# Long enough that a quiet board does not wake the agent every few minutes,
+# short enough that a reaped doorbell is the exception rather than the rule.
+DEFAULT_WAIT_SECONDS = 900
+
 def resolve_self() -> str:
     alias = presence.whoami()
     if not alias:
@@ -97,7 +101,9 @@ def cmd_close(args) -> int:
 def cmd_wait(args) -> int:
     from comms import doorbell
     me = resolve_self()
-    reason = doorbell.wait(me, interval=args.interval, max_seconds=args.max_seconds)
+    # `--max-seconds 0` means "no bound", which the doorbell spells as None.
+    reason = doorbell.wait(me, interval=args.interval,
+                           max_seconds=args.max_seconds or None)
     print(f"DOORBELL: {reason}")
     return 0
 
@@ -170,7 +176,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("close").set_defaults(fn=cmd_close)
     w = sub.add_parser("wait")
     w.add_argument("--interval", type=float, default=presence.POLL_INTERVAL)
-    w.add_argument("--max-seconds", dest="max_seconds", type=float, default=None)
+    # Bounded by default: something outside comms reaps this process, and a
+    # bound turns the common case into `DOORBELL: timeout` — a reason the agent
+    # can act on — instead of an empty output it has to interpret. It does NOT
+    # eliminate the reaping: deaths before the bound were observed in two
+    # sessions on 2026-08-11, which is why the skill still rules on silence.
+    # 0 restores the unbounded wait.
+    w.add_argument("--max-seconds", dest="max_seconds", type=float,
+                   default=DEFAULT_WAIT_SECONDS,
+                   help="0 espera indefinidamente")
     w.set_defaults(fn=cmd_wait)
 
     sp = sub.add_parser("spawn"); sp.add_argument("alias")
