@@ -45,6 +45,17 @@ class WaitForSessionTest(unittest.TestCase):
         self.assertFalse(ghostty.wait_for_session(
             "/tmp/repo", set(), timeout=0.3, settle=0))
 
+    def test_a_record_with_no_cwd_never_counts(self):
+        # os.path.realpath("") resolves to the CURRENT directory, which
+        # equals `target` whenever spawning into this process's own cwd —
+        # the common case. Without the guard, any unrelated new session
+        # missing `cwd` would satisfy the wait instantly.
+        from comms import ghostty, store, paths
+        store.write_json(os.path.join(paths.sessions_dir(), "sess-nocwd.json"),
+                         {"sessionId": "sess-nocwd", "pid": os.getpid()})
+        self.assertFalse(ghostty.wait_for_session(
+            os.getcwd(), set(), timeout=0.3, settle=0))
+
     def test_spawn_waits_before_restoring_focus(self):
         from comms import ghostty
         order = []
@@ -65,6 +76,23 @@ class WaitForSessionTest(unittest.TestCase):
         self.assertIn("restore", order)
         self.assertLess(order.index("wait"), order.index("restore"),
                         "o foco voltou antes de a sessão nova registrar sua aba")
+
+    def test_spawn_does_not_wait_when_the_spawn_itself_failed(self):
+        # A spawn that already failed — Ghostty not running, Automation
+        # permission denied — has no tab to wait for. Waiting anyway would
+        # hold the caller for the full 30s timeout before it could report
+        # the error that already happened.
+        from comms import ghostty
+        rows = [{"window": "w1", "terminal": "t-prev", "cwd": "/tmp/repo",
+                 "selected": True, "front_window": "w1"}]
+
+        with mock.patch.object(ghostty, "list_terminals", return_value=rows), \
+             mock.patch.object(ghostty, "_osascript", return_value=(False, "")), \
+             mock.patch.object(ghostty, "wait_for_session") as wait:
+            ok = ghostty.spawn("front", "/tmp/repo", "leia o plano")
+
+        self.assertFalse(ok)
+        wait.assert_not_called()
 
 
 class GhosttyScriptTest(unittest.TestCase):

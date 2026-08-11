@@ -203,7 +203,12 @@ def wait_for_session(cwd: str, before: set, timeout: float = 30.0,
         for sid, rec in native.sessions().items():
             if sid in before:
                 continue
-            if os.path.realpath(rec.get("cwd") or "") == target:
+            # A record with no cwd must never match: os.path.realpath("")
+            # resolves to the CURRENT directory, which equals `target`
+            # whenever spawning into this process's own cwd — the common
+            # case — and would satisfy the wait on any unrelated new session.
+            rec_cwd = rec.get("cwd")
+            if rec_cwd and os.path.realpath(rec_cwd) == target:
                 time.sleep(settle)
                 return True
         time.sleep(0.1)
@@ -234,7 +239,10 @@ def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     from comms import native
     before = set(native.sessions())
     ok, _ = _osascript(build_spawn_script(cwd, None, launch, env, window))
-    if window and prev_terminal and front:
+    # A spawn that already failed — Ghostty not running, Automation
+    # permission denied — has no tab to wait for. Waiting anyway would hold
+    # the caller for the full timeout before it could even report the error.
+    if ok and window and prev_terminal and front:
         # Never restore focus before the new session has recorded its own tab —
         # see wait_for_session for what breaks when we do.
         wait_for_session(cwd, before)
