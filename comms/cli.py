@@ -47,6 +47,14 @@ def _bell(e) -> str:
         return "—"
     return "surda" if e["stale"] else "armada"
 
+def _trunc(s: str, width: int) -> str:
+    """Cut to `width` with a visible ellipsis.
+
+    A native name Claude Code chose on its own (`joao-claude-setup-skills-
+    commands`, 33 chars) routinely outgrows a fixed column, and padding
+    without truncating pushes every column after it out of alignment."""
+    return s if len(s) <= width else s[:width - 1] + "…"
+
 def cmd_who(args) -> int:
     from comms import delegation
     entries = presence.read_all()
@@ -58,7 +66,7 @@ def cmd_who(args) -> int:
           f"{'NOME NATIVO':<22} {'VISTO':<10} NOTA")
     for e in entries:
         print(f"{e['alias']:<10} {e.get('role',''):<13} {_state(e):<14} "
-              f"{_bell(e):<10} {(e.get('native_name') or '—'):<22} "
+              f"{_bell(e):<10} {_trunc(e.get('native_name') or '—', 22):<22} "
               f"{_age(e.get('last_seen', 0)):<10} {e.get('note','')}")
     if grants:
         # Printed as its own block, not a column: an approval relayed by an

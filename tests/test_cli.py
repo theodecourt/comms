@@ -186,6 +186,26 @@ class CliTest(unittest.TestCase):
         _, out = run("who")
         self.assertIn("front-tab", out)
 
+    def test_who_truncates_a_long_native_name_to_keep_columns_aligned(self):
+        # Real example on this machine: a session joined manually comes up
+        # in the registry as `joao-claude-setup-skills-commands` (34 chars),
+        # well past the 22-wide NOME NATIVO column. Padding without
+        # truncating pushes VISTO and NOTA out of alignment for every row.
+        from comms import store, paths
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-front"
+        run("open", "front")
+        long_name = "joao-claude-setup-skills-commands"
+        store.write_json(os.path.join(paths.sessions_dir(), "1.json"),
+                         {"sessionId": "sess-front", "pid": os.getpid(),
+                          "status": "busy", "name": long_name})
+        _, out = run("who")
+        header, line = out.splitlines()[0], \
+            [l for l in out.splitlines() if l.startswith("front")][0]
+        self.assertNotIn(long_name, line)
+        self.assertIn("…", line)
+        visto_col = header.index("VISTO")
+        self.assertEqual(line[visto_col:visto_col + 5], "agora")
+
     def test_log_renders_a_native_record_without_a_body(self):
         # cmd_log lê m["body"] direto; um registro nativo não tem corpo e
         # levantaria KeyError.
