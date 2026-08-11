@@ -90,7 +90,11 @@ def cmd_inbox(args) -> int:
 def cmd_log(args) -> int:
     me = resolve_self()
     for m in messages.log(me):
-        print(f"[{_age(m['ts'])}] {m['from']}: {m['body']}")
+        if m.get("kind") == "native":
+            mark = "" if m.get("delivered") else "  ⚠ NÃO ENTREGUE"
+            print(f"[{_age(m['ts'])}] {m['from']} → {m['to']}: via nativo{mark}")
+        else:
+            print(f"[{_age(m['ts'])}] {m['from']}: {m['body']}")
     return 0
 
 def cmd_close(args) -> int:

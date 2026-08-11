@@ -186,6 +186,27 @@ class CliTest(unittest.TestCase):
         _, out = run("who")
         self.assertIn("front-tab", out)
 
+    def test_log_renders_a_native_record_without_a_body(self):
+        # cmd_log lê m["body"] direto; um registro nativo não tem corpo e
+        # levantaria KeyError.
+        from comms import messages
+        os.environ["COMMS_ALIAS"] = "orch"
+        run("open", "orch")
+        messages.record_native("orch", "builder", alias="builder",
+                               delivered=True, msg_id="abc")
+        code, out = run("log")
+        self.assertEqual(code, 0)
+        self.assertIn("via nativo", out)
+
+    def test_log_marks_an_undelivered_native_record(self):
+        from comms import messages
+        os.environ["COMMS_ALIAS"] = "orch"
+        run("open", "orch")
+        messages.record_native("orch", "builder", alias="builder",
+                               delivered=False, msg_id="")
+        _, out = run("log")
+        self.assertIn("NÃO ENTREGUE", out)
+
 
 if __name__ == "__main__":
     unittest.main()

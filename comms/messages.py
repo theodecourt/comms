@@ -63,3 +63,28 @@ def log(alias: str) -> list:
             return [json.loads(line) for line in fh if line.strip()]
     except OSError:
         return []
+
+def record_native(sender: str, to_name: str, alias: str = None,
+                  delivered: bool = True, msg_id: str = "") -> dict:
+    """Registra que uma mensagem foi pelo transporte nativo.
+
+    Guarda o fato, nunca o corpo: o texto trafega pelo nativo e o board é
+    testemunha, não transporte. Escreve nos DOIS lados porque "quem falou com
+    quem" só é auditável se o remetente também puder ver o que mandou.
+
+    `delivered=False` é gravado de propósito. O fallback para `comms post` é
+    responsabilidade do agente, e um fallback esquecido precisa deixar rastro.
+    """
+    rec = {
+        "id": msg_id or uuid.uuid4().hex[:12],
+        "ts": time.time(),
+        "from": sender,
+        "to": alias or to_name,
+        "kind": "native",
+        "delivered": bool(delivered),
+        "off_board": alias is None,
+    }
+    _append_log(sender, rec)
+    if alias and alias != sender:
+        _append_log(alias, rec)
+    return rec
