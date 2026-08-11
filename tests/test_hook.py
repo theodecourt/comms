@@ -103,5 +103,21 @@ class HookTest(unittest.TestCase):
         r = self.fire("UserPromptSubmit", session="sess-orch", transcript=big)
         self.assertIn("comms handoff", r.stdout)
 
+    def test_installer_adds_the_sendmessage_hook_with_a_matcher(self):
+        # Sem matcher o hook rodaria em TODA chamada de ferramenta.
+        import json, os, subprocess, sys, tempfile
+        settings = os.path.join(self.tmp, "settings.json")
+        with open(settings, "w") as fh:
+            json.dump({"hooks": {}}, fh)
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        script = os.path.join(root, "hooks", "install_hooks.py")
+        env = dict(os.environ, COMMS_SETTINGS=settings)
+        p = subprocess.run([sys.executable, script], env=env,
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        cfg = json.load(open(settings))
+        groups = cfg["hooks"]["PostToolUse"]
+        self.assertTrue(any(g.get("matcher") == "SendMessage" for g in groups))
+
 if __name__ == "__main__":
     unittest.main()
