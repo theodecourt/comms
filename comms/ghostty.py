@@ -1,6 +1,6 @@
 """Drives Ghostty over AppleScript. The constraints encoded here were measured
 on 2026-08-01 — see docs/specs §10.2 before changing any of them."""
-import json, os, subprocess, tempfile
+import json, os, subprocess, tempfile, time
 
 # Fields are separated by "|:|", not by `tab`. Inside `tell application
 # "Ghostty"` the word `tab` resolves to Ghostty's own tab CLASS, not to the
@@ -172,6 +172,43 @@ def is_trusted_dir(cwd: str) -> bool:
         return True     # cannot tell — do not block the spawn on a guess
     return os.path.realpath(cwd) in {os.path.realpath(k) for k in projects}
 
+def wait_for_session(cwd: str, before: set, timeout: float = 30.0,
+                     settle: float = 2.0) -> bool:
+    """Hold the new tab in focus until its SessionStart hook has run.
+
+    Restoring focus immediately corrupts session→terminal mapping downstream.
+    The agent-monitor hook records which Ghostty tab owns a session by asking
+    which tab is focused at SessionStart, guarded only by working directory —
+    and window_for_cwd deliberately opens the new tab in the window ALREADY on
+    that repo, so the tab we restore focus to has the same cwd and sails past
+    that guard. The new session then records the SPAWNING tab's id, two
+    sessions claim one terminal, and agent-monitor evicts them from one another
+    on every pass, painting titles onto the wrong tabs. Observed 2026-08-11:
+    `builder` and `orch` both reported terminal A9B83B31.
+
+    It was intermittent because Ghostty selects the new tab asynchronously, so
+    the restore sometimes landed before that and sometimes after — the same
+    race already documented in spawn(). Waiting removes the race instead of
+    hoping to win it.
+
+    Measured 2026-08-11: the session registry appears ~1.5s after spawn and
+    SessionStart fires ~0.33s after that, so the registry alone is too early —
+    hence `settle`. Returns False on timeout, and the caller restores focus
+    anyway: a slow session must not strand the user's focus forever.
+    """
+    from comms import native
+    target = os.path.realpath(cwd)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for sid, rec in native.sessions().items():
+            if sid in before:
+                continue
+            if os.path.realpath(rec.get("cwd") or "") == target:
+                time.sleep(settle)
+                return True
+        time.sleep(0.1)
+    return False
+
 def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     """Open a Ghostty session for `alias`. Returns True only when the spawn
     invocation itself succeeded — the caller (cmd_spawn) uses this to avoid
@@ -194,8 +231,13 @@ def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     # ASCII sidesteps it — Python writes the file as UTF-8 and the shell
     # reads it back intact.
     launch = _briefing_launch(briefing, alias)
+    from comms import native
+    before = set(native.sessions())
     ok, _ = _osascript(build_spawn_script(cwd, None, launch, env, window))
     if window and prev_terminal and front:
+        # Never restore focus before the new session has recorded its own tab —
+        # see wait_for_session for what breaks when we do.
+        wait_for_session(cwd, before)
         # Separate invocation on purpose: `select tab` issued right after
         # `new tab` in the same script is silently ignored, even with a
         # delay, because Ghostty selects the new tab asynchronously and

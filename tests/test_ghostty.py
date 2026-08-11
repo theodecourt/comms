@@ -1,6 +1,71 @@
 # tests/test_ghostty.py — script generation only; no AppleScript is executed
-import unittest
+import os, shutil, tempfile, unittest
 from unittest import mock
+
+class WaitForSessionTest(unittest.TestCase):
+    """Focus must stay on the spawned tab until its SessionStart hook ran."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.environ["COMMS_ROOT"] = self.tmp      # drags the sessions dir along
+        os.makedirs(os.path.join(self.tmp, "sessions"), exist_ok=True)
+
+    def tearDown(self):
+        os.environ.pop("COMMS_ROOT", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _register(self, sid, cwd):
+        from comms import store, paths
+        store.write_json(os.path.join(paths.sessions_dir(), sid + ".json"),
+                         {"sessionId": sid, "cwd": cwd, "pid": os.getpid()})
+
+    def test_returns_true_once_the_new_session_registers(self):
+        from comms import ghostty
+        self._register("sess-new", "/tmp/repo")
+        self.assertTrue(ghostty.wait_for_session("/tmp/repo", set(), settle=0))
+
+    def test_times_out_when_nothing_ever_registers(self):
+        # False must still let the caller restore focus — a session that never
+        # starts must not strand the user's focus on a dead tab.
+        from comms import ghostty
+        self.assertFalse(
+            ghostty.wait_for_session("/tmp/repo", set(), timeout=0.3, settle=0))
+
+    def test_a_session_that_was_already_there_does_not_count(self):
+        # Otherwise the spawning session itself satisfies the wait instantly,
+        # which is exactly the bug: same repo, same cwd, wrong tab.
+        from comms import ghostty
+        self._register("sess-old", "/tmp/repo")
+        self.assertFalse(ghostty.wait_for_session(
+            "/tmp/repo", {"sess-old"}, timeout=0.3, settle=0))
+
+    def test_a_new_session_in_another_repo_does_not_count(self):
+        from comms import ghostty
+        self._register("sess-elsewhere", "/tmp/other")
+        self.assertFalse(ghostty.wait_for_session(
+            "/tmp/repo", set(), timeout=0.3, settle=0))
+
+    def test_spawn_waits_before_restoring_focus(self):
+        from comms import ghostty
+        order = []
+        rows = [{"window": "w1", "terminal": "t-prev", "cwd": "/tmp/repo",
+                 "selected": True, "front_window": "w1"}]
+
+        def fake_osascript(script):
+            order.append("restore" if "activate window" in script else "script")
+            return True, ""
+
+        with mock.patch.object(ghostty, "list_terminals", return_value=rows), \
+             mock.patch.object(ghostty, "_osascript", side_effect=fake_osascript), \
+             mock.patch.object(ghostty, "wait_for_session",
+                               side_effect=lambda *a, **k: order.append("wait")):
+            ghostty.spawn("front", "/tmp/repo", "leia o plano")
+
+        self.assertIn("wait", order)
+        self.assertIn("restore", order)
+        self.assertLess(order.index("wait"), order.index("restore"),
+                        "o foco voltou antes de a sessão nova registrar sua aba")
+
 
 class GhosttyScriptTest(unittest.TestCase):
     def test_spawn_script_carries_all_four_fields(self):

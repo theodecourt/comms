@@ -143,8 +143,10 @@ Handoff is never automatic. The hook warns you; the user decides.
 session in a Ghostty tab — a tab in that repo's window, or a new window if none
 is open there. The orchestrator uses this to staff its own team.
 
-Focus briefly jumps to the new tab and returns. That flicker is a known
-limitation, not a bug.
+Focus stays on the new tab for a few seconds, then returns. `spawn` blocks for
+that time on purpose: the new session has to record which tab is its own before
+focus moves away, or it records the spawning tab instead and two sessions end
+up claiming one terminal.
 
 ## Commands
 
