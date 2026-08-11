@@ -24,10 +24,15 @@ user names you.
 The output holds a `DOORBELL:` line.
 
 - `DOORBELL: closed` → comms is off. Do **not** re-arm.
+- `DOORBELL: killed` — something outside comms reaped the process (SIGTERM or
+  SIGHUP). This looks like a failure and is not. **Re-arm.**
+- `DOORBELL: timeout` — the wait's own bound (900s default) elapsed with no
+  mail. Not a failure either. **Re-arm** — it is level-triggered, so mail that
+  arrived in the meantime fires it again immediately.
 - **No `DOORBELL:` line at all** — empty output, task reported as killed →
-  something outside comms reaped the process. This is the one case that looks
-  like a failure and is not. **Re-arm.** Stopping here is how a session goes
-  deaf for hours while still showing up on the board as available.
+  SIGKILL, the one signal the doorbell cannot catch and name for itself. Same
+  read as `killed` above: **re-arm.** Stopping here is how a session goes deaf
+  for hours while still showing up on the board as available.
 - Otherwise:
   1. `comms inbox` — reads and consumes. Use `--peek` to look without consuming.
   2. Act on the messages (see Routing).
@@ -59,9 +64,12 @@ Run `comms who` before asking anything.
 
 ## Sending: native first, comms when it fails
 
-Send with `SendMessage`. Run `comms who` to choose the alias, then `ListAgents`
-to get its ` [ref]` — the ref is ephemeral, so read it fresh every time and
-never store it.
+Send with `SendMessage`. Run `comms who` and read the **NOME NATIVO** column —
+that, not the alias, is the name `ListAgents` lists a peer under. The two
+match only for a session `comms spawn` created (it launches `claude -n
+<alias>`); a session that joined manually keeps whatever name Claude Code gave
+it. Match NOME NATIVO against `ListAgents` to get the peer's ` [ref]` — the ref
+is ephemeral, so read it fresh every time and never store it.
 
 If `SendMessage` comes back `success: false`, the peer is unreachable — most
 often a session being replaced by a handoff. Fall back to `comms post --to
@@ -82,6 +90,9 @@ responses:
   `theo` or to `orch`.
 - **CAMPAINHA `surda`** — its doorbell is not armed. Native messages still get
   through; only the comms path (fallbacks, broadcasts) waits for it to re-arm.
+
+**NOME NATIVO** is neither of those — it is how you address the row, not what
+it means. See Sending, above.
 
 ## Escalate decisions, not permission
 
