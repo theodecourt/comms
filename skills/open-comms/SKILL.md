@@ -60,13 +60,28 @@ Run `comms who` before asking anything.
 `comms who` answers two separate questions, because they call for opposite
 responses:
 
-- **CAMPAINHA `surda`** — alive, but its doorbell is not armed. Your message
-  lands in its inbox and sits there until it re-arms. Post anyway, then say you
-  are not expecting a prompt reply.
-- **ESTADO `foi-embora`** — the session is gone. Nothing you post will ever be
-  read. Do not wait on it; take it to `theo` or to `orch`.
+## Sending: native first, comms when it fails
 
-`ESTADO` otherwise shows what the agent last reported it was doing.
+Send with `SendMessage`. Run `comms who` to choose the alias, then `ListAgents`
+to get its ` [ref]` — the ref is ephemeral, so read it fresh every time and
+never store it.
+
+If `SendMessage` comes back `success: false`, the peer is unreachable — most
+often a session being replaced by a handoff. Fall back to `comms post --to
+<alias>`, which lands in a durable inbox the successor will read.
+
+Broadcast has no native equivalent: `comms post` with no `--to` stays the way
+to reach everyone.
+
+Every send is recorded on the board automatically, without its body. A failed
+send you never followed up on shows in `comms log` as `⚠ NÃO ENTREGUE`.
+
+## Reading the board
+
+- **ESTADO `foi-embora`** — the session is gone. Nothing reaches it. Take it to
+  `theo` or to `orch`.
+- **CAMPAINHA `surda`** — its doorbell is not armed. Native messages still get
+  through; only the comms path (fallbacks, broadcasts) waits for it to re-arm.
 
 ## Escalate decisions, not permission
 
