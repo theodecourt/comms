@@ -153,4 +153,4 @@ A causa da ceifa do doorbell continua sem diagnóstico, e são **pelo menos duas
 uma capturável (SIGTERM/SIGHUP, agora tratada e visível) e a do exit 144, que não
 passa pelo handler. Este desenho não a resolve — ele torna o doorbell não
 crítico, que é o que importa na prática. Registro em
-`scratchpad/2026-08-11-doorbell-morte-silenciosa.md`.
+`scratchpad/work/doorbell/2026-08-11-doorbell-morte-silenciosa.md`.

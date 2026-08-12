@@ -38,22 +38,22 @@ def _state(e) -> str:
         return "foi-embora"
     return e.get("status", "?")
 
-def _bell(e) -> str:
-    """Whether a message would actually wake this agent.
-
-    Its own column because it is orthogonal to `_state`: an agent can be alive
-    and working yet unreachable, and the two call for opposite responses."""
-    if e.get("live") is False:
-        return "—"
-    return "surda" if e["stale"] else "armada"
+NATIVE_NAME_WIDTH = 34      # fits the names Claude Code derives on its own
 
 def _trunc(s: str, width: int) -> str:
-    """Cut to `width` with a visible ellipsis.
+    """Cut to `width` from the MIDDLE, keeping both ends.
 
-    A native name Claude Code chose on its own (`joao-claude-setup-skills-
-    commands`, 33 chars) routinely outgrows a fixed column, and padding
-    without truncating pushes every column after it out of alignment."""
-    return s if len(s) <= width else s[:width - 1] + "…"
+    This column is an addressing key: the reader matches it against
+    `ListAgents` to find a peer. Cutting the tail off broke exactly that —
+    `joao-claude-setup-skills-commands` came out as `joao-claude-setup-ski…`
+    and an agent had to guess by prefix (reported from a real test,
+    2026-08-12). Keeping head and tail leaves enough to recognise the name
+    either way."""
+    if len(s) <= width:
+        return s
+    keep = width - 1
+    head = (keep + 1) // 2
+    return s[:head] + "…" + s[len(s) - (keep - head):]
 
 def cmd_who(args) -> int:
     from comms import delegation
@@ -62,11 +62,18 @@ def cmd_who(args) -> int:
     if not entries and not grants:
         print("ninguém no board")
         return 0
-    print(f"{'ALIAS':<10} {'PAPEL':<13} {'ESTADO':<14} {'CAMPAINHA':<10} "
-          f"{'NOME NATIVO':<22} {'VISTO':<10} NOTA")
+    # No bell column. It reported whether a `comms wait` was armed, which
+    # mattered while the doorbell was how mail arrived. Native SendMessage
+    # reaches a session with no background process, and comms-path mail now
+    # surfaces through the hook at the agent's next turn, so nothing depends on
+    # anyone holding a doorbell open — the column would read `surda` for
+    # everyone, always, and mean nothing.
+    print(f"{'ALIAS':<10} {'PAPEL':<13} {'ESTADO':<14} "
+          f"{'NOME NATIVO':<{NATIVE_NAME_WIDTH}} {'VISTO':<10} NOTA")
     for e in entries:
+        name = _trunc(e.get("native_name") or "—", NATIVE_NAME_WIDTH)
         print(f"{e['alias']:<10} {e.get('role',''):<13} {_state(e):<14} "
-              f"{_bell(e):<10} {_trunc(e.get('native_name') or '—', 22):<22} "
+              f"{name:<{NATIVE_NAME_WIDTH}} "
               f"{_age(e.get('last_seen', 0)):<10} {e.get('note','')}")
     if grants:
         # Printed as its own block, not a column: an approval relayed by an

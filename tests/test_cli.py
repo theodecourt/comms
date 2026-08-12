@@ -42,36 +42,45 @@ class CliTest(unittest.TestCase):
         e["last_seen"] = time.time() - 999
         store.write_json(paths.presence_file(alias), e)
 
-    def test_who_reports_an_unarmed_doorbell_as_surda(self):
-        # A dead doorbell means "will not be woken by a message", which is
-        # about reachability — not about whether the agent is still there.
+    def test_who_has_no_bell_column(self):
+        # The bell reported whether a `comms wait` was armed. Nothing depends
+        # on that any more: native sends need no doorbell, and comms-path mail
+        # surfaces through the hook at the next turn. A column that would read
+        # the same for everyone forever is noise in a table agents read.
         run("open", "infra")
         self._stop_the_doorbell("infra")
         _, out = run("who")
-        self.assertIn("surda", out)
-        self.assertNotIn("foi-embora", out)
+        self.assertNotIn("CAMPAINHA", out)
+        self.assertNotIn("surda", out)
+        self.assertNotIn("armada", out)
 
-    def test_who_separates_a_dead_agent_from_a_deaf_one(self):
-        # The whole point of the split: these two rows used to be identical,
-        # yet a sender should wait for one and give up on the other.
-        import json, os
+    def test_who_still_reports_a_dead_agent(self):
+        # Liveness comes from Claude Code's session registry, not from the
+        # heartbeat, so removing the bell must not cost us this.
+        import os
         from comms import store, paths
-        os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-deaf"
-        run("open", "deaf")
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-alive"
+        run("open", "vivo")
         os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-gone"
         run("open", "gone")
-        for alias in ("deaf", "gone"):
-            self._stop_the_doorbell(alias)
-        # Only `deaf` is still in the registry, and on a pid that exists.
         store.write_json(os.path.join(paths.sessions_dir(), "1.json"),
-                         {"sessionId": "sess-deaf", "pid": os.getpid(),
+                         {"sessionId": "sess-alive", "pid": os.getpid(),
                           "status": "busy"})
         _, out = run("who")
-        deaf = [l for l in out.splitlines() if l.startswith("deaf")][0]
+        vivo = [l for l in out.splitlines() if l.startswith("vivo")][0]
         gone = [l for l in out.splitlines() if l.startswith("gone")][0]
-        self.assertIn("surda", deaf)
-        self.assertNotIn("foi-embora", deaf)
+        self.assertNotIn("foi-embora", vivo)
         self.assertIn("foi-embora", gone)
+
+    def test_a_long_native_name_keeps_both_ends(self):
+        # This column is an addressing key matched against ListAgents. Cutting
+        # the tail forced an agent to guess by prefix in a real test on
+        # 2026-08-12; keeping head and tail leaves the name recognisable.
+        from comms import cli
+        out = cli._trunc("joao-claude-setup-skills-commands-e-mais-coisa", 34)
+        self.assertEqual(len(out), 34)
+        self.assertTrue(out.startswith("joao-claude"))
+        self.assertTrue(out.endswith("coisa"))
 
     def test_wait_is_bounded_by_default(self):
         # An unbounded doorbell that gets reaped leaves an empty output the
@@ -186,22 +195,35 @@ class CliTest(unittest.TestCase):
         _, out = run("who")
         self.assertIn("front-tab", out)
 
-    def test_who_truncates_a_long_native_name_to_keep_columns_aligned(self):
-        # Real example on this machine: a session joined manually comes up
-        # in the registry as `joao-claude-setup-skills-commands` (34 chars),
-        # well past the 22-wide NOME NATIVO column. Padding without
-        # truncating pushes VISTO and NOTA out of alignment for every row.
+    def test_a_real_derived_name_fits_without_truncation(self):
+        # `joao-claude-setup-skills-commands` (33 chars) is what a manually
+        # joined session actually gets on this machine. The column is sized so
+        # the common case is shown whole — truncating it was what forced an
+        # agent to match by prefix.
         from comms import store, paths
         os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-front"
         run("open", "front")
-        long_name = "joao-claude-setup-skills-commands"
+        real_name = "joao-claude-setup-skills-commands"
+        store.write_json(os.path.join(paths.sessions_dir(), "1.json"),
+                         {"sessionId": "sess-front", "pid": os.getpid(),
+                          "status": "busy", "name": real_name})
+        _, out = run("who")
+        line = [l for l in out.splitlines() if l.startswith("front")][0]
+        self.assertIn(real_name, line)
+
+    def test_who_keeps_columns_aligned_past_the_name_width(self):
+        # Padding without truncating pushes VISTO and NOTA out of alignment
+        # for every row, so a name past the column width still has to be cut.
+        from comms import cli, store, paths
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-front"
+        run("open", "front")
+        long_name = "x" * (cli.NATIVE_NAME_WIDTH + 20)
         store.write_json(os.path.join(paths.sessions_dir(), "1.json"),
                          {"sessionId": "sess-front", "pid": os.getpid(),
                           "status": "busy", "name": long_name})
         _, out = run("who")
         header, line = out.splitlines()[0], \
             [l for l in out.splitlines() if l.startswith("front")][0]
-        self.assertNotIn(long_name, line)
         self.assertIn("…", line)
         visto_col = header.index("VISTO")
         self.assertEqual(line[visto_col:visto_col + 5], "agora")

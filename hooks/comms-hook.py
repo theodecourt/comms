@@ -59,6 +59,25 @@ def main() -> int:
     status = STATUS_BY_EVENT.get(name)
     presence.touch(alias, status=status)
 
+    if name in ("UserPromptSubmit", "SessionStart"):
+        # Mail on the comms path — a broadcast, or a fallback from a failed
+        # native send — used to be announced by the doorbell: a background
+        # process whose exit woke the session. That cost a wake-up every time
+        # its bound elapsed, whether or not anything had arrived, and it was
+        # reaped without warning besides. Anything urgent now travels by
+        # native SendMessage, which wakes a peer with no background process at
+        # all, so the comms path no longer needs one either: it can wait for
+        # the agent's next turn, which is exactly when this hook runs.
+        from comms import messages
+        # peek: counting must not consume. The agent still has to run
+        # `comms inbox` to read, and that is what marks the mail as seen.
+        waiting = messages.inbox(alias, peek=True)
+        if waiting:
+            senders = ", ".join(sorted({m["from"] for m in waiting}))
+            plural = "ns" if len(waiting) != 1 else "m"
+            print(f"✉ {len(waiting)} mensage{plural} no comms, de {senders} "
+                  f"— rode `comms inbox`")
+
     if name == "UserPromptSubmit":
         # Claude Code only forwards a hook's stdout into the model's context
         # on UserPromptSubmit (and SessionStart) — printing this on Stop

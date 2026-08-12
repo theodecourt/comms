@@ -5,40 +5,39 @@ description: Join the local comms board so other Claude Code sessions on this Ma
 
 # open-comms
 
-Other Claude Code sessions on this Mac can post you messages; a background
-doorbell wakes you when mail arrives. Local only — no network, no other people's
-agents.
+Other Claude Code sessions on this Mac can address you, wake you, and hand off to
+you. Local only — no network, no other people's agents.
 
 ## Joining
 
 1. `comms open <alias> --note "<what you are working on>"` — the note is what
    others see in `comms who`, so make it specific.
-2. Arm the doorbell **in the background** (`run_in_background: true`): `comms wait`
-3. Tell the user you are reachable as `<alias>`, then finish your turn normally.
+2. Tell the user you are reachable as `<alias>`, then finish your turn normally.
+
+That is all. There is no background process to arm and nothing to keep alive.
 
 Your alias arrives in `COMMS_ALIAS` when another agent spawned you. Otherwise the
 user names you.
 
-## When a `comms wait` background task completes — the doorbell rang
+## How mail reaches you
 
-The output holds a `DOORBELL:` line.
+Two paths, and you do nothing to enable either.
 
-- `DOORBELL: closed` → comms is off. Do **not** re-arm.
-- `DOORBELL: killed` — something outside comms reaped the process (SIGTERM or
-  SIGHUP). This looks like a failure and is not. **Re-arm.**
-- `DOORBELL: timeout` — the wait's own bound (900s default) elapsed with no
-  mail. Not a failure either. **Re-arm** — it is level-triggered, so mail that
-  arrived in the meantime fires it again immediately.
-- **No `DOORBELL:` line at all** — empty output, task reported as killed →
-  SIGKILL, the one signal the doorbell cannot catch and name for itself. Same
-  read as `killed` above: **re-arm.** Stopping here is how a session goes deaf
-  for hours while still showing up on the board as available.
-- Otherwise:
-  1. `comms inbox` — reads and consumes. Use `--peek` to look without consuming.
-  2. Act on the messages (see Routing).
-  3. **Re-arm: `comms wait` in the background.** Mandatory. Skip it and you go
-     deaf until the user opens comms again. It is level-triggered — mail that
-     arrived while you worked fires it again immediately.
+**Native `SendMessage`** — a peer addressing you directly. It arrives inside your
+turn as a `<cross-session-message>` block and wakes you if you were idle. It does
+not touch the comms inbox, so `comms inbox` will not show it.
+
+**The comms path** — a broadcast, or a fallback from a send that failed. It lands
+in your inbox, and a hook tells you at the start of your next turn:
+`✉ 2 mensagens no comms, de orch, front`. Run `comms inbox` to read and consume
+them.
+
+There is no doorbell to arm. Mail on the comms path waits for your next turn
+instead of interrupting it — which is correct, because anything that cannot wait
+comes natively and wakes you on its own.
+
+`comms wait` still exists for a session that genuinely wants to block on mail,
+but joining the board does not require it and nothing depends on it.
 
 ## Roles
 
@@ -64,16 +63,28 @@ Run `comms who` before asking anything.
 
 ## Sending: native first, comms when it fails
 
-Send with `SendMessage`. Run `comms who` and read the **NOME NATIVO** column —
-that, not the alias, is the name `ListAgents` lists a peer under. The two
-match only for a session `comms spawn` created (it launches `claude -n
-<alias>`); a session that joined manually keeps whatever name Claude Code gave
-it. Match NOME NATIVO against `ListAgents` to get the peer's ` [ref]` — the ref
-is ephemeral, so read it fresh every time and never store it.
+`SendMessage` may be a deferred tool in your harness — if it is not already in
+your toolset, load it with `ToolSearch("select:SendMessage")` first.
 
-If `SendMessage` comes back `success: false`, the peer is unreachable — most
-often a session being replaced by a handoff. Fall back to `comms post --to
-<alias>`, which lands in a durable inbox the successor will read.
+Run `comms who` and read the **NOME NATIVO** column — that, not the alias, is
+the name `ListAgents` lists a peer under. The two match only for a session
+`comms spawn` created (it launches `claude -n <alias>`); a session that joined
+manually keeps whatever name Claude Code gave it. Match NOME NATIVO against
+`ListAgents` to get the peer's ` [ref]`.
+
+**Always send `name [ref]`, never the bare name.** The tool's own description
+says to prefer the bare name and add the ref only to disambiguate — for a peer
+in another session that is wrong, and every bare-name send is rejected even when
+only one row could possibly match (measured, four for four, 2026-08-12). The ref
+is ephemeral: read it fresh from `ListAgents` every time and never store it.
+
+`success: false` has two very different causes, and the message says which:
+
+- **"Re-send with the ref"** — an addressing error. The peer is fine. Send again
+  with the ref it just handed you. Do **not** fall back.
+- **"No agent named … is reachable"** — the peer is genuinely gone, most often a
+  session being replaced by a handoff. Now fall back: `comms post --to <alias>`
+  lands in a durable inbox the successor will read.
 
 Broadcast has no native equivalent: `comms post` with no `--to` stays the way
 to reach everyone.
@@ -83,16 +94,12 @@ send you never followed up on shows in `comms log` as `⚠ NÃO ENTREGUE`.
 
 ## Reading the board
 
-`comms who` answers two separate questions, because they call for opposite
-responses:
-
-- **ESTADO `foi-embora`** — the session is gone. Nothing reaches it. Take it to
-  `theo` or to `orch`.
-- **CAMPAINHA `surda`** — its doorbell is not armed. Native messages still get
-  through; only the comms path (fallbacks, broadcasts) waits for it to re-arm.
-
-**NOME NATIVO** is neither of those — it is how you address the row, not what
-it means. See Sending, above.
+- **ESTADO `foi-embora`** — the session is gone. Nothing reaches it, natively or
+  otherwise. Take it to `theo` or to `orch`.
+- **ESTADO** otherwise is what the agent last reported it was doing.
+- **NOME NATIVO** is not a state — it is how you address the row. See Sending,
+  above. A name too long for the column is cut in the middle, so both ends stay
+  recognisable.
 
 ## Escalate decisions, not permission
 

@@ -103,6 +103,31 @@ class HookTest(unittest.TestCase):
         r = self.fire("UserPromptSubmit", session="sess-orch", transcript=big)
         self.assertIn("comms handoff", r.stdout)
 
+    def test_pending_mail_is_announced_on_the_next_turn(self):
+        # This replaces the doorbell for the comms path: no background process,
+        # no re-arming. The notice has to reach the MODEL, and Claude Code only
+        # forwards a hook's stdout into context on UserPromptSubmit and
+        # SessionStart — so it must be printed, not merely computed.
+        from comms import messages
+        messages.post("orch", "olha isso", to="front")
+        for event in ("UserPromptSubmit", "SessionStart"):
+            r = self.fire(event)
+            self.assertIn("comms inbox", r.stdout, event)
+            self.assertIn("orch", r.stdout, event)
+
+    def test_counting_pending_mail_does_not_consume_it(self):
+        # Announcing must not eat the message: the agent still has to run
+        # `comms inbox`, and that run is what marks it seen.
+        from comms import messages
+        messages.post("orch", "olha isso", to="front")
+        self.fire("UserPromptSubmit")
+        self.assertEqual(len(messages.inbox("front", peek=True)), 1)
+
+    def test_no_mail_says_nothing(self):
+        # A notice that fires every turn is a notice nobody reads.
+        r = self.fire("UserPromptSubmit")
+        self.assertNotIn("comms inbox", r.stdout)
+
     def test_installer_adds_the_sendmessage_hook_with_a_matcher(self):
         # Sem matcher o hook rodaria em TODA chamada de ferramenta.
         settings = os.path.join(self.tmp, "settings.json")
