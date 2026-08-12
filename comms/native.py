@@ -59,6 +59,72 @@ def sessions() -> dict:
     return {} if degraded else out
 
 
+def named_by_a_human(session_id: str) -> bool:
+    """Whether this session's name was CHOSEN rather than derived.
+
+    Claude Code gives every session a name. Left alone it derives one from the
+    directory — `comms-16`, `segura-intelligence-cc` — which carries no
+    intent and should not be built on. A name set by `claude -n` at launch or
+    by `/rename` mid-session is a decision, and writes a `custom-title` record
+    into the session's transcript. Measured 2026-08-12: 10 such records in a
+    session spawned with `-n`, 9 in one the user renamed, 0 in a derived one.
+
+    Reading the transcript rather than pattern-matching the name is the point —
+    a derived name that happens to look chosen, or the reverse, would fool any
+    heuristic, and this question decides what a spawned session is called.
+    """
+    if not session_id:
+        return False
+    import glob
+    for path in glob.glob(os.path.join(paths.projects_dir(), "*",
+                                       f"{session_id}.jsonl")):
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    if '"custom-title"' in line or '"customTitle"' in line:
+                        return True
+        except OSError:
+            continue
+    return False
+
+
+def session_name(alias: str, parent_name: str = None,
+                 parent_alias: str = None, parent_role: str = None) -> str:
+    """What to call a session spawned as `alias` by a session named
+    `parent_name`.
+
+    A spawned session inherits its parent's name with the role marker swapped:
+    `PROJETO-KB-ORCHESTRATOR` spawning `api` becomes `PROJETO-KB-api`. The
+    project is the part worth carrying; the role is the part that changed.
+
+    Only a marker we can PROVE belongs to the parent is stripped — its own
+    alias or its own role, matched case-insensitively at the end. Guessing at a
+    vocabulary of role-looking words would eventually eat a real project name:
+    nothing distinguishes `-ORCHESTRATOR` from `-AUTOMATICO` except knowing
+    that the first one is this session's own.
+
+    With no parent name — the parent was never named, so its name carries no
+    intent — the alias stands alone, which is what it did before.
+    """
+    if not parent_name:
+        return alias
+    base = parent_name
+    for marker in (parent_alias, parent_role):
+        if not marker:
+            continue
+        low, mark = base.lower(), marker.lower()
+        if low == mark:
+            # The parent's whole name is its own role — every session spawned
+            # before names carried a project looks like this. There is nothing
+            # to pass on, and `api-front` would be one role glued to another.
+            base = ""
+            break
+        if low.endswith("-" + mark):
+            base = base[: -(len(marker) + 1)]
+            break
+    return f"{base}-{alias}" if base else alias
+
+
 def pid_alive(pid) -> bool:
     """Signal 0 probes for existence without touching the process.
 

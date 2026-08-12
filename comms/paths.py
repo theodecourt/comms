@@ -21,6 +21,19 @@ def sessions_dir() -> str:
         return os.path.join(os.environ["COMMS_ROOT"], "sessions")
     return os.path.expanduser("~/.claude/sessions")
 
+def projects_dir() -> str:
+    """Where Claude Code keeps one transcript per session — read, never written.
+
+    Bound to COMMS_ROOT for the same reason sessions_dir() is: a test that read
+    the real transcripts would depend on which sessions this machine happens to
+    have."""
+    explicit = os.environ.get("COMMS_PROJECTS_DIR")
+    if explicit:
+        return explicit
+    if os.environ.get("COMMS_ROOT"):
+        return os.path.join(os.environ["COMMS_ROOT"], "projects")
+    return os.path.expanduser("~/.claude/projects")
+
 def presence_dir() -> str:
     return os.path.join(root(), "presence")
 

@@ -49,6 +49,65 @@ class NativeTest(unittest.TestCase):
         self._write("half-written.json", '{"sessionId": "sess-b"')
         self.assertEqual(native.sessions(), {})
 
+    def test_a_named_parent_passes_its_project_to_the_child(self):
+        # The case this exists for: PROJETO-…-ORCHESTRATOR spawning `api`.
+        from comms import native
+        self.assertEqual(
+            native.session_name("api",
+                                "PROJETO-PEDRO-KB-INSERCAO-AUTOMATICO-ORCHESTRATOR",
+                                parent_alias="orch", parent_role="orchestrator"),
+            "PROJETO-PEDRO-KB-INSERCAO-AUTOMATICO-api")
+
+    def test_the_marker_stripped_may_be_the_parents_alias(self):
+        # Chaining: a builder spawning a builder. `api` is the parent's alias,
+        # so it is provably a role marker and not part of the project.
+        from comms import native
+        self.assertEqual(
+            native.session_name("front", "PROJETO-KB-api",
+                                parent_alias="api", parent_role="builder"),
+            "PROJETO-KB-front")
+
+    def test_a_project_word_that_merely_looks_like_a_role_is_kept(self):
+        # Nothing distinguishes `-AUTOMATICO` from `-ORCHESTRATOR` except
+        # knowing which one is this session's own. A vocabulary of
+        # role-looking words would eventually eat a real project name.
+        from comms import native
+        self.assertEqual(
+            native.session_name("api", "PROJETO-AUTOMATICO",
+                                parent_alias="orch", parent_role="orchestrator"),
+            "PROJETO-AUTOMATICO-api")
+
+    def test_an_unnamed_parent_leaves_the_alias_alone(self):
+        from comms import native
+        self.assertEqual(native.session_name("api", None), "api")
+        self.assertEqual(native.session_name("api", ""), "api")
+
+    def test_stripping_is_case_insensitive(self):
+        # The user types the role in caps; the alias is lowercase by validation.
+        from comms import native
+        self.assertEqual(
+            native.session_name("ai", "X-ORCH", parent_alias="orch"), "X-ai")
+
+    def test_a_name_that_is_only_the_marker_falls_back_to_the_alias(self):
+        # Stripping would leave nothing to prefix with.
+        from comms import native
+        self.assertEqual(native.session_name("api", "orch",
+                                             parent_alias="orch"), "api")
+
+    def test_named_by_a_human_reads_the_transcript_not_the_name(self):
+        from comms import native, paths
+        d = os.path.join(paths.projects_dir(), "-Users-theo-repo")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "sess-named.jsonl"), "w") as fh:
+            fh.write('{"type":"user"}\n')
+            fh.write('{"type":"custom-title","customTitle":"PROJETO-X"}\n')
+        with open(os.path.join(d, "sess-derived.jsonl"), "w") as fh:
+            fh.write('{"type":"user"}\n')
+        self.assertTrue(native.named_by_a_human("sess-named"))
+        self.assertFalse(native.named_by_a_human("sess-derived"))
+        self.assertFalse(native.named_by_a_human(""))
+        self.assertFalse(native.named_by_a_human("sess-inexistente"))
+
     def test_pid_alive_on_this_very_process(self):
         from comms import native
         self.assertTrue(native.pid_alive(os.getpid()))
