@@ -36,9 +36,6 @@ There is no doorbell to arm. Mail on the comms path waits for your next turn
 instead of interrupting it — which is correct, because anything that cannot wait
 comes natively and wakes you on its own.
 
-`comms wait` still exists for a session that genuinely wants to block on mail,
-but joining the board does not require it and nothing depends on it.
-
 ## Roles
 
 `orch` is the orchestrator; every other alias is a builder.
@@ -193,7 +190,6 @@ up claiming one terminal.
 | `comms who` | who is on the board, their state and note |
 | `comms post --to <alias> "msg"` | send; omit `--to` to broadcast |
 | `comms inbox [--peek]` | read unread mail |
-| `comms wait` | arm the doorbell — always in the background |
 | `comms log` | full history, including read messages |
 | `comms spawn <alias>` | open a new session |
 | `comms handoff "<state>"` | replace this session, keeping the alias |

@@ -6,11 +6,12 @@ it when the session exits. `presence.open()` already records
 CLAUDE_CODE_SESSION_ID, so the two sides join on `sessionId` with no new
 plumbing — measured 2026-08-11 against the three real sessions on this machine.
 
-Why this exists: comms used to infer liveness from its own heartbeat, which
-only the doorbell writes. An agent that was alive and working but had not
-re-armed `comms wait` looked exactly like an agent that had died (observed
-twice in one session on 2026-08-11). The registry answers the two questions
-separately — is the process there, and what does the harness say it is doing.
+Why this exists: comms used to infer liveness from its own heartbeat, written
+by a background `comms wait` loop. An agent that was alive and working but had
+not re-armed that loop looked exactly like an agent that had died (observed
+twice in one session on 2026-08-11). The registry answers the question directly
+— is the process there — which is also what let that loop be deleted outright
+rather than repaired.
 
 Everything here is read-only and optional. Every function degrades to "unknown"
 rather than raising, so comms keeps working unchanged where the registry is

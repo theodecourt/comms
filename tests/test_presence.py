@@ -57,20 +57,6 @@ class PresenceTest(unittest.TestCase):
         presence.touch("ghost", status="working")   # must not raise
         self.assertEqual(presence.read_all(), [])
 
-    def test_stale_when_last_seen_older_than_ttl(self):
-        from comms import presence, store, paths
-        presence.open("infra")
-        p = paths.presence_file("infra")
-        entry = store.read_json(p)
-        entry["last_seen"] = time.time() - (presence.TTL + 5)
-        store.write_json(p, entry)
-        self.assertTrue(presence.read_all()[0]["stale"])
-
-    def test_fresh_entry_is_not_stale(self):
-        from comms import presence
-        presence.open("infra")
-        self.assertFalse(presence.read_all()[0]["stale"])
-
     def test_close_removes_entry(self):
         from comms import presence
         presence.open("front")

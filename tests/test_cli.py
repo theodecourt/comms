@@ -35,24 +35,27 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("alias", out.lower())
 
-    def _stop_the_doorbell(self, alias):
-        from comms import store, paths
-        import time
-        e = store.read_json(paths.presence_file(alias))
-        e["last_seen"] = time.time() - 999
-        store.write_json(paths.presence_file(alias), e)
-
     def test_who_has_no_bell_column(self):
-        # The bell reported whether a `comms wait` was armed. Nothing depends
-        # on that any more: native sends need no doorbell, and comms-path mail
-        # surfaces through the hook at the next turn. A column that would read
-        # the same for everyone forever is noise in a table agents read.
+        # The bell reported whether a `comms wait` was armed. There is no
+        # `comms wait` any more: native sends need no doorbell, and comms-path
+        # mail surfaces through the hook at the agent's next turn.
         run("open", "infra")
-        self._stop_the_doorbell("infra")
         _, out = run("who")
         self.assertNotIn("CAMPAINHA", out)
         self.assertNotIn("surda", out)
         self.assertNotIn("armada", out)
+
+    def test_there_is_no_wait_command(self):
+        # A command that exists gets used. Removing it is what makes "no
+        # doorbell for any session" true rather than merely recommended.
+        # argparse rejects an unknown subcommand inside parse_args, before
+        # main()'s own SystemExit handler, so it propagates rather than
+        # becoming a return code.
+        import contextlib, io
+        from comms import cli
+        with self.assertRaises(SystemExit), \
+             contextlib.redirect_stderr(io.StringIO()):
+            cli.main(["wait"])
 
     def test_who_still_reports_a_dead_agent(self):
         # Liveness comes from Claude Code's session registry, not from the
@@ -81,27 +84,6 @@ class CliTest(unittest.TestCase):
         self.assertEqual(len(out), 34)
         self.assertTrue(out.startswith("joao-claude"))
         self.assertTrue(out.endswith("coisa"))
-
-    def test_wait_is_bounded_by_default(self):
-        # An unbounded doorbell that gets reaped leaves an empty output the
-        # agent has to interpret; a bound makes the common case say why.
-        from unittest import mock
-        from comms import cli, doorbell
-        os.environ["COMMS_ALIAS"] = "orch"
-        run("open", "orch")
-        with mock.patch.object(doorbell, "wait", return_value="timeout") as w:
-            run("wait")
-        self.assertEqual(w.call_args.kwargs["max_seconds"],
-                         cli.DEFAULT_WAIT_SECONDS)
-
-    def test_wait_zero_restores_the_unbounded_wait(self):
-        from unittest import mock
-        from comms import cli, doorbell
-        os.environ["COMMS_ALIAS"] = "orch"
-        run("open", "orch")
-        with mock.patch.object(doorbell, "wait", return_value="mail") as w:
-            run("wait", "--max-seconds", "0")
-        self.assertIsNone(w.call_args.kwargs["max_seconds"])
 
     def test_post_and_inbox_roundtrip(self):
         run("open", "orch")
