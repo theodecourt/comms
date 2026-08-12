@@ -10,7 +10,19 @@ def valid_alias(alias: str) -> bool:
     return bool(alias) and bool(_ALIAS_RE.match(alias))
 
 def role_for(alias: str) -> str:
-    return "orchestrator" if alias == "orch" else "builder"
+    """`orch`, or any `orch-<something>`, orchestrates. Everyone else builds.
+
+    One board holds more than one orchestrator — a front and a back for the
+    same project, say — and they need distinct aliases because an alias is the
+    board's primary key. The prefix is what keeps the role readable at a glance
+    while letting the rest of the alias say which one it is.
+
+    The role is not decoration: the context-limit hook warns an orchestrator at
+    80% and a builder at 70%, on the reasoning that an orchestrator's context is
+    the scarce thing. An `orch-front` classified as a builder would be pushed
+    into a handoff earlier than it should be."""
+    return "orchestrator" if alias == "orch" or alias.startswith("orch-") \
+        else "builder"
 
 def open(alias, note="", role=None, session=None, cwd=None, terminal=None) -> dict:
     store.ensure_dirs(alias)

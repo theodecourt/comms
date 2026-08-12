@@ -56,6 +56,50 @@ class WaitForSessionTest(unittest.TestCase):
         self.assertFalse(ghostty.wait_for_session(
             os.getcwd(), set(), timeout=0.3, settle=0))
 
+    def test_an_orchestrator_makes_itself_the_childs_orchestrator(self):
+        from comms import ghostty
+        os.environ["COMMS_ALIAS"] = "orch-back"
+        os.environ.pop("COMMS_ORCH", None)
+        try:
+            self.assertEqual(ghostty.orchestrator_for_child(), "orch-back")
+        finally:
+            os.environ.pop("COMMS_ALIAS", None)
+
+    def test_a_builder_passes_down_the_one_it_was_given(self):
+        # The pointer travels the tree: a builder's own children answer to the
+        # same orchestrator the builder does, not to whichever it finds.
+        from comms import ghostty
+        os.environ["COMMS_ALIAS"] = "api"
+        os.environ["COMMS_ORCH"] = "orch-back"
+        try:
+            self.assertEqual(ghostty.orchestrator_for_child(), "orch-back")
+        finally:
+            for k in ("COMMS_ALIAS", "COMMS_ORCH"):
+                os.environ.pop(k, None)
+
+    def test_nothing_to_pass_on_stays_empty(self):
+        # Empty is honest. A session with no orchestrator should ask its human,
+        # not adopt whichever one happens to be on the board.
+        from comms import ghostty
+        for k in ("COMMS_ALIAS", "COMMS_ORCH"):
+            os.environ.pop(k, None)
+        self.assertEqual(ghostty.orchestrator_for_child(), "")
+
+    def test_spawn_hands_the_child_its_orchestrator(self):
+        from comms import ghostty
+        scripts = []
+        os.environ["COMMS_ALIAS"] = "orch-front"
+        try:
+            with mock.patch.object(ghostty, "list_terminals", return_value=[]), \
+                 mock.patch.object(ghostty, "wait_for_session"), \
+                 mock.patch.object(ghostty, "_osascript",
+                                   side_effect=lambda s: (scripts.append(s), (True, ""))[1]):
+                ghostty.spawn("front", "/tmp/repo", "leia o plano")
+        finally:
+            os.environ.pop("COMMS_ALIAS", None)
+        script = [s for s in scripts if "with configuration" in s][0]
+        self.assertIn("COMMS_ORCH=orch-front", script)
+
     def test_spawn_waits_before_restoring_focus(self):
         from comms import ghostty
         order = []

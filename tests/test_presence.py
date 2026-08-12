@@ -18,6 +18,20 @@ class PresenceTest(unittest.TestCase):
         self.assertEqual(presence.role_for("orch"), "orchestrator")
         self.assertEqual(presence.role_for("front"), "builder")
 
+    def test_a_prefixed_alias_still_orchestrates(self):
+        # One board, two orchestrators — a front and a back for the same
+        # project — need distinct aliases, since the alias is the board's key.
+        from comms import presence
+        self.assertEqual(presence.role_for("orch-front"), "orchestrator")
+        self.assertEqual(presence.role_for("orch-back"), "orchestrator")
+
+    def test_the_hyphen_is_what_makes_it_a_prefix(self):
+        # Otherwise any alias merely starting with those four letters would be
+        # promoted, and the role decides the context-warning threshold.
+        from comms import presence
+        self.assertEqual(presence.role_for("orchid"), "builder")
+        self.assertEqual(presence.role_for("orchestration-helper"), "builder")
+
     def test_alias_validation_rejects_spaces_and_hash(self):
         from comms import presence
         self.assertTrue(presence.valid_alias("build-1"))

@@ -1,6 +1,6 @@
 ---
 name: open-comms
-description: Join the local comms board so other Claude Code sessions on this Mac can message you and wake you up. Use when the user says "abre comms", "open comms", "entra no board", names a session role (orch, front, ai, infra, build-N), or asks this session to be reachable by other agents.
+description: Join the local comms board so other Claude Code sessions on this Mac can message you and wake you up. Use when the user says "abre comms", "open comms", "entra no board", names a session role (orch, orch-front, orch-back, front, ai, api, infra, build-N), or asks this session to be reachable by other agents.
 ---
 
 # open-comms
@@ -50,7 +50,14 @@ comes natively and wakes you on its own.
 
 ## Roles
 
-`orch` is the orchestrator; every other alias is a builder.
+`orch`, and any `orch-<something>`, is an orchestrator; every other alias is a
+builder. A board can hold several — `orch-front` and `orch-back` for the two
+halves of one project — so "the orchestrator" is not a thing you can look up.
+
+**`COMMS_ORCH` names yours.** It is set when you are spawned, and it is
+inherited: an orchestrator that spawns you puts itself there, and a builder that
+spawns you passes down its own. If it is unset, you do not have one — ask the
+user rather than adopting whichever orchestrator you see on the board.
 
 **Orchestrator:** plans, delegates, reviews, and is the only agent that pushes.
 It does **not** build — a bug it finds, even a one-liner, goes back to the
@@ -67,7 +74,8 @@ Run `comms who` before asking anything.
 
 - Domain question → the **specialist**, not the orchestrator. Frontend goes to
   `front`, AI/prompts/skills to `ai`, infra to `infra`.
-- Scope, priority, conflict between agents, change of plan → `orch`.
+- Scope, priority, conflict between agents, change of plan → your
+  orchestrator, the one named in `COMMS_ORCH`.
 - Product decision, spend, anything irreversible → `theo`.
 
 ## Sending: native first, comms when it fails
@@ -104,7 +112,7 @@ send you never followed up on shows in `comms log` as `⚠ NÃO ENTREGUE`.
 ## Reading the board
 
 - **ESTADO `foi-embora`** — the session is gone. Nothing reaches it, natively or
-  otherwise. Take it to `theo` or to `orch`.
+  otherwise. Take it to `theo` or to your orchestrator.
 - **ESTADO** otherwise is what the agent last reported it was doing.
 - **NOME NATIVO** is not a state — it is how you address the row. See Sending,
   above. A name too long for the column is cut in the middle, so both ends stay
@@ -179,7 +187,8 @@ either check it now or mark it explicitly as unverified.
 ## Context limits
 
 - Orchestrator at ~80%: tell the user, propose `comms handoff`, wait for a yes.
-- Builder at ~70%: finish the current task, accept no new one, tell `orch`.
+- Builder at ~70%: finish the current task, accept no new one, tell your
+  orchestrator.
 
 Handoff is never automatic. The hook warns you; the user decides.
 

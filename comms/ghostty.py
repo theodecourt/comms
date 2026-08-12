@@ -235,6 +235,23 @@ def wait_for_session(cwd: str, before: set, timeout: float = 30.0,
         time.sleep(0.1)
     return False
 
+def orchestrator_for_child() -> str:
+    """Which orchestrator the session about to be spawned answers to.
+
+    With more than one orchestrator on the board — `orch-front` and
+    `orch-back` — "escalate to orch" stops naming anybody, and a builder that
+    picks by reading the board is guessing. So the answer is inherited rather
+    than looked up: an orchestrator that spawns is the child's orchestrator, and
+    anyone else passes down the one it was given.
+
+    Empty when there is nothing to pass on, which is honest — a session with no
+    orchestrator should ask its human, not adopt whichever one it finds."""
+    from comms import presence
+    mine = os.environ.get("COMMS_ALIAS") or ""
+    if mine and presence.role_for(mine) == "orchestrator":
+        return mine
+    return os.environ.get("COMMS_ORCH") or ""
+
 def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     """Open a Ghostty session for `alias`. Returns True only when the spawn
     invocation itself succeeded — the caller (cmd_spawn) uses this to avoid
@@ -247,6 +264,9 @@ def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     env = [f"COMMS_ALIAS={alias}"]
     if role:
         env.append(f"COMMS_ROLE={role}")
+    orch = orchestrator_for_child()
+    if orch:
+        env.append(f"COMMS_ORCH={orch}")
     # No `command` — the login shell launches claude from `initial input`, so
     # the session inherits a real PATH (see build_spawn_script for why).
     #
