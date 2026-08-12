@@ -49,6 +49,22 @@ def main() -> int:
         if entry.get("session") == session:
             alias = entry["alias"]
             break
+
+    if alias is None and name == "SessionStart":
+        # A spawned session carries its alias in COMMS_ALIAS, so it can join
+        # the board by itself and does not have to be told to. Doing it here
+        # rather than in the launch line is what makes the entry usable: only
+        # this process knows CLAUDE_CODE_SESSION_ID, and without that id the
+        # entry cannot be joined against Claude Code's session registry —
+        # which is where liveness and the addressing name come from.
+        wanted = os.environ.get("COMMS_ALIAS") or ""
+        if presence.valid_alias(wanted):
+            taken = {e["alias"] for e in presence.read_all()}
+            if wanted not in taken:
+                presence.open(wanted, role=os.environ.get("COMMS_ROLE") or None,
+                              session=session, cwd=event.get("cwd") or None)
+                alias = wanted
+
     if alias is None:
         return 0        # session never joined the board
 

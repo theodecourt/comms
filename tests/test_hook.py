@@ -103,6 +103,49 @@ class HookTest(unittest.TestCase):
         r = self.fire("UserPromptSubmit", session="sess-orch", transcript=big)
         self.assertIn("comms handoff", r.stdout)
 
+    def test_a_spawned_session_joins_the_board_by_itself(self):
+        # comms spawn puts the alias in COMMS_ALIAS; the session should not have
+        # to be told to join. Doing it in the hook rather than the launch line
+        # is what makes the entry joinable against the session registry, since
+        # only this process knows its own session id.
+        from comms import presence
+        env = dict(os.environ, COMMS_ROOT=self.tmp, COMMS_ALIAS="build-7")
+        payload = json.dumps({"session_id": "sess-spawned",
+                              "hook_event_name": "SessionStart",
+                              "cwd": "/tmp/repo", "transcript_path": ""})
+        r = subprocess.run([sys.executable, HOOK], input=payload,
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        entry = [e for e in presence.read_all() if e["alias"] == "build-7"]
+        self.assertEqual(len(entry), 1)
+        self.assertEqual(entry[0]["session"], "sess-spawned")
+        self.assertEqual(entry[0]["cwd"], "/tmp/repo")
+
+    def test_auto_join_never_takes_an_alias_already_on_the_board(self):
+        # Two sessions sharing an alias would fight over one board row, and the
+        # newcomer would silently inherit the other's note and role.
+        from comms import presence
+        env = dict(os.environ, COMMS_ROOT=self.tmp, COMMS_ALIAS="front")
+        payload = json.dumps({"session_id": "sess-impostor",
+                              "hook_event_name": "SessionStart",
+                              "cwd": "/tmp/repo", "transcript_path": ""})
+        subprocess.run([sys.executable, HOOK], input=payload,
+                       capture_output=True, text=True, env=env)
+        front = [e for e in presence.read_all() if e["alias"] == "front"][0]
+        self.assertEqual(front["session"], "sess-1")   # o original, do setUp
+
+    def test_auto_join_ignores_a_junk_alias(self):
+        from comms import presence
+        env = dict(os.environ, COMMS_ROOT=self.tmp, COMMS_ALIAS="BUILDER #1")
+        payload = json.dumps({"session_id": "sess-junk",
+                              "hook_event_name": "SessionStart",
+                              "cwd": "/tmp/repo", "transcript_path": ""})
+        r = subprocess.run([sys.executable, HOOK], input=payload,
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual([e for e in presence.read_all()
+                          if e["alias"] != "front"], [])
+
     def test_pending_mail_is_announced_on_the_next_turn(self):
         # This replaces the doorbell for the comms path: no background process,
         # no re-arming. The notice has to reach the MODEL, and Claude Code only

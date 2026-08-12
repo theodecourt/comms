@@ -8,16 +8,28 @@ description: Join the local comms board so other Claude Code sessions on this Ma
 Other Claude Code sessions on this Mac can address you, wake you, and hand off to
 you. Local only — no network, no other people's agents.
 
-## Joining
+## Who you are
 
-1. `comms open <alias> --note "<what you are working on>"` — the note is what
-   others see in `comms who`, so make it specific.
-2. Tell the user you are reachable as `<alias>`, then finish your turn normally.
+**`COMMS_ALIAS` is the answer.** It is the only source of truth for your own
+alias — check it before presenting yourself as anyone. Do not infer your alias
+from `comms who`: that board lists the OTHER sessions, and a session that
+guessed the closest-looking row has already introduced itself as another agent
+by mistake.
 
-That is all. There is no background process to arm and nothing to keep alive.
+`COMMS_ALIAS` set means `comms spawn` created you, and **you are already on the
+board** — the hook put you there at startup. Add what you are working on, since
+only you know it:
 
-Your alias arrives in `COMMS_ALIAS` when another agent spawned you. Otherwise the
-user names you.
+```
+comms open <alias> --note "<what you are working on>"
+```
+
+`COMMS_ALIAS` unset means you joined on your own initiative. Ask the user for an
+alias if they have not given you one, then run the same command.
+
+Either way that is all of it: there is no background process to arm and nothing
+to keep alive. Tell the user you are reachable as `<alias>` and finish your turn
+normally.
 
 ## How mail reaches you
 
