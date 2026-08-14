@@ -1,6 +1,6 @@
 ---
 name: open-comms
-description: Join the local comms board so other Claude Code sessions on this Mac can message you and wake you up. Use when the user says "abre comms", "open comms", "entra no board", names a session role (orch, orch-front, orch-back, front, ai, api, infra, build-N), or asks this session to be reachable by other agents.
+description: Join the local comms board so other Claude Code sessions on this Mac can message you and wake you up. Use when the user says "abre comms", "open comms", "entra no board", names a session role (orch, orch-front, orch-back, builder-1, builder-2), or asks this session to be reachable by other agents.
 ---
 
 # open-comms
@@ -50,9 +50,19 @@ comes natively and wakes you on its own.
 
 ## Roles
 
-`orch`, and any `orch-<something>`, is an orchestrator; every other alias is a
-builder. A board can hold several — `orch-front` and `orch-back` for the two
-halves of one project — so "the orchestrator" is not a thing you can look up.
+**An alias names the role and nothing else.** `orch` orchestrates; builders are
+`builder-1`, `builder-2`, `builder-3`. There is no `api`, `front` or `ai` — what
+a builder is working on goes in its `--note`, which is the field made for it and
+which can change without renaming anything.
+
+The repo is not in the alias because it is already beside it everywhere the
+alias appears: the tab and the bubble read `🔔 segura-api · orch`, and the board
+has its own column. Putting it in the alias too would say the same thing twice
+in the place with the least room for it.
+
+`orch-<algo>` also orchestrates — `orch-front` and `orch-back` when one board
+carries two, which is why "the orchestrator" is not something you can look up.
+Every other alias builds.
 
 **`COMMS_ORCH` names yours.** It is set when you are spawned, and it is
 inherited: an orchestrator that spawns you puts itself there, and a builder that
@@ -72,8 +82,10 @@ else has.
 
 Run `comms who` before asking anything.
 
-- Domain question → the **specialist**, not the orchestrator. Frontend goes to
-  `front`, AI/prompts/skills to `ai`, infra to `infra`.
+- Domain question → whoever is working on that thing, not the orchestrator. The
+  aliases no longer say who that is, so read the NOTA column: it is where a
+  builder writes what it is on, and it is what makes `builder-2` addressable as
+  a person rather than a number.
 - Scope, priority, conflict between agents, change of plan → your
   orchestrator, the one named in `COMMS_ORCH`.
 - Product decision, spend, anything irreversible → `theo`.
@@ -212,6 +224,7 @@ up claiming one terminal.
 | `comms post --to <alias> "msg"` | send; omit `--to` to broadcast |
 | `comms inbox [--peek]` | read unread mail |
 | `comms log` | full history, including read messages |
+| `comms rename <alias>` | change your own alias; mail, history and grant follow |
 | `comms spawn <alias>` | open a new session |
 | `comms handoff "<state>"` | replace this session, keeping the alias |
 | `comms delegate <alias> "<scope>"` | human grants scoped approval authority |

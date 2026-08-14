@@ -79,8 +79,25 @@ class PresenceTest(unittest.TestCase):
 
     def test_whoami_prefers_env_alias(self):
         from comms import presence
+        presence.open("front")
         os.environ["COMMS_ALIAS"] = "front"
         self.assertEqual(presence.whoami(), "front")
+
+    def test_whoami_ignores_an_env_alias_that_left_the_board(self):
+        # COMMS_ALIAS is frozen at spawn and cannot be updated from outside the
+        # process, so after a rename or a close it names an identity that no
+        # longer exists. The session id outlives both.
+        from comms import presence
+        presence.open("portal-back-builder", session="sess-1")
+        os.environ["COMMS_ALIAS"] = "api"           # o nome de antes
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "sess-1"
+        self.assertEqual(presence.whoami(), "portal-back-builder")
+
+    def test_whoami_is_none_when_the_env_alias_is_all_there_is(self):
+        # Better to say "I do not know who I am" than to post as a ghost.
+        from comms import presence
+        os.environ["COMMS_ALIAS"] = "fantasma"
+        self.assertIsNone(presence.whoami())
 
     def test_whoami_falls_back_to_session_match(self):
         from comms import presence

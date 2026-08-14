@@ -12,15 +12,17 @@ def valid_alias(alias: str) -> bool:
 def role_for(alias: str) -> str:
     """`orch`, or any `orch-<something>`, orchestrates. Everyone else builds.
 
-    One board holds more than one orchestrator — a front and a back for the
-    same project, say — and they need distinct aliases because an alias is the
-    board's primary key. The prefix is what keeps the role readable at a glance
-    while letting the rest of the alias say which one it is.
+    An alias says the role and nothing else — `orch`, `builder-1`, `builder-2`.
+    What a builder is working on goes in its `--note`, and which repo it sits
+    in is already visible everywhere the alias is shown. A board can hold more
+    than one orchestrator, which is why the prefixed form exists.
 
     The role is not decoration: the context-limit hook warns an orchestrator at
     80% and a builder at 70%, on the reasoning that an orchestrator's context is
     the scarce thing. An `orch-front` classified as a builder would be pushed
-    into a handoff earlier than it should be."""
+    into a handoff earlier than it should be.
+
+    The hyphen carries the rule — without it `orchid` would orchestrate."""
     return "orchestrator" if alias == "orch" or alias.startswith("orch-") \
         else "builder"
 
@@ -96,8 +98,15 @@ def read_all() -> list:
     return out
 
 def whoami():
+    """This session's alias, or None.
+
+    COMMS_ALIAS is trusted only while it still names a row on the board. The
+    variable is frozen at spawn time and cannot be updated from outside the
+    process, so after a rename — or a close — it names an identity that no
+    longer exists, and a session that believed it would post as a ghost. The
+    session id survives both, so it is what the fallback matches on."""
     alias = os.environ.get("COMMS_ALIAS")
-    if alias:
+    if alias and os.path.exists(paths.presence_file(alias)):
         return alias
     session = os.environ.get("CLAUDE_CODE_SESSION_ID")
     if not session:

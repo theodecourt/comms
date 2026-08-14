@@ -117,10 +117,19 @@ class CliTest(unittest.TestCase):
     def test_handoff_reports_alias_not_on_board(self):
         # No `open` was ever run for this alias — it is simply not on the
         # board. The CLI must print why, not just exit non-zero silently.
-        os.environ["COMMS_ALIAS"] = "fantasma"
-        code, out = run("handoff", "estado qualquer")
+        # Passed with --alias, because whoami no longer hands back an alias
+        # that is not on the board; this guard is now reached that way.
+        code, out = run("handoff", "estado qualquer", "--alias", "fantasma")
         self.assertNotEqual(code, 0)
         self.assertIn("não está no board", out)
+
+    def test_an_unknown_env_alias_says_it_does_not_know_who_it_is(self):
+        # The other half of the same change: a stale COMMS_ALIAS must not let
+        # a command run under an identity the board never heard of.
+        os.environ["COMMS_ALIAS"] = "fantasma"
+        code, out = run("post", "--to", "orch", "oi")
+        self.assertEqual(code, 2)
+        self.assertIn("não sei quem sou", out)
 
     def test_handoff_reports_spawn_failure_and_keeps_old_session_on_board(self):
         from comms import presence

@@ -35,6 +35,7 @@ def _state(e) -> str:
     return e.get("status", "?")
 
 NATIVE_NAME_WIDTH = 34      # fits the names Claude Code derives on its own
+ALIAS_WIDTH = 12            # fits `orch-front` and `builder-10`
 
 def _trunc(s: str, width: int) -> str:
     """Cut to `width` from the MIDDLE, keeping both ends.
@@ -64,11 +65,12 @@ def cmd_who(args) -> int:
     # surfaces through the hook at the agent's next turn, so nothing depends on
     # anyone holding a doorbell open — the column would read `surda` for
     # everyone, always, and mean nothing.
-    print(f"{'ALIAS':<10} {'PAPEL':<13} {'ESTADO':<14} "
+    print(f"{'ALIAS':<{ALIAS_WIDTH}} {'PAPEL':<13} {'ESTADO':<14} "
           f"{'NOME NATIVO':<{NATIVE_NAME_WIDTH}} {'VISTO':<10} NOTA")
     for e in entries:
+        alias = _trunc(e["alias"], ALIAS_WIDTH)
         name = _trunc(e.get("native_name") or "—", NATIVE_NAME_WIDTH)
-        print(f"{e['alias']:<10} {e.get('role',''):<13} {_state(e):<14} "
+        print(f"{alias:<{ALIAS_WIDTH}} {e.get('role',''):<13} {_state(e):<14} "
               f"{name:<{NATIVE_NAME_WIDTH}} "
               f"{_age(e.get('last_seen', 0)):<10} {e.get('note','')}")
     if grants:
@@ -106,6 +108,19 @@ def cmd_log(args) -> int:
             print(f"[{_age(m['ts'])}] {m['from']} → {m['to']}: via nativo{mark}")
         else:
             print(f"[{_age(m['ts'])}] {m['from']}: {m['body']}")
+    return 0
+
+def cmd_rename(args) -> int:
+    from comms import rename
+    me = resolve_self()
+    try:
+        novo = rename.run(me, args.alias)
+    except rename.RenameRefused as e:
+        print(str(e))
+        return 2
+    print(f"{me} agora é {novo} — mensagens, histórico e delegação vieram junto")
+    print(f"o nome nativo da sessão não muda: use /rename {novo} se quiser os "
+          f"dois iguais")
     return 0
 
 def cmd_close(args) -> int:
@@ -180,6 +195,10 @@ def build_parser() -> argparse.ArgumentParser:
     i.set_defaults(fn=cmd_inbox)
 
     sub.add_parser("log").set_defaults(fn=cmd_log)
+
+    rn = sub.add_parser("rename"); rn.add_argument("alias")
+    rn.set_defaults(fn=cmd_rename)
+
     sub.add_parser("close").set_defaults(fn=cmd_close)
     # No `wait`. It backgrounded a polling loop whose exit woke an idle
     # session; native SendMessage wakes a peer with no process at all, and
