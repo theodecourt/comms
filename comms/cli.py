@@ -21,7 +21,11 @@ def cmd_open(args) -> int:
     if not presence.valid_alias(args.alias):
         print(f"alias inválido: {args.alias!r} — use minúsculas, dígitos e hífen")
         return 2
-    e = presence.open(args.alias, note=args.note or "", role=args.role)
+    alias = presence.resolve_alias(
+        args.alias, session=os.environ.get("CLAUDE_CODE_SESSION_ID"))
+    e = presence.open(alias, note=args.note or "", role=args.role)
+    if alias != args.alias:
+        print(f"{args.alias} → {alias}")
     print(f"{e['alias']} aberto como {e['role']}")
     return 0
 
@@ -35,7 +39,8 @@ def _state(e) -> str:
     return e.get("status", "?")
 
 NATIVE_NAME_WIDTH = 34      # fits the names Claude Code derives on its own
-ALIAS_WIDTH = 12            # fits `orch-front` and `builder-10`
+ALIAS_WIDTH = 16            # fits `builder-front-2`, the longest the
+                            # convention produces before it starts truncating
 
 def _trunc(s: str, width: int) -> str:
     """Cut to `width` from the MIDDLE, keeping both ends.
@@ -141,12 +146,18 @@ def cmd_spawn(args) -> int:
               f"nada. Abra o diretório uma vez manualmente (`cd {cwd} && claude`), "
               f"aceite o diálogo, e rode o spawn de novo.")
         return 2
-    ok = ghostty.spawn(args.alias, cwd, args.briefing, role=presence.role_for(args.alias))
+    # Resolved against the TARGET repo, not this one: the child's layer comes
+    # from where it will live. Doing it here also means COMMS_ALIAS reaches the
+    # child already final, so its auto-join has nothing left to decide.
+    alias = presence.resolve_alias(args.alias, cwd=cwd)
+    if alias != args.alias:
+        print(f"{args.alias} → {alias}")
+    ok = ghostty.spawn(alias, cwd, args.briefing, role=presence.role_for(alias))
     if not ok:
-        print(f"falha ao abrir sessão {args.alias} — Ghostty pode não estar rodando, "
+        print(f"falha ao abrir sessão {alias} — Ghostty pode não estar rodando, "
               f"ou a permissão de Automação (System Settings > Privacy & Security) não foi concedida")
         return 1
-    print(f"sessão {args.alias} aberta em {cwd}")
+    print(f"sessão {alias} aberta em {cwd}")
     return 0
 
 def cmd_handoff(args) -> int:

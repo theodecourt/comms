@@ -18,6 +18,61 @@ class PresenceTest(unittest.TestCase):
         self.assertEqual(presence.role_for("orch"), "orchestrator")
         self.assertEqual(presence.role_for("front"), "builder")
 
+    def test_a_bare_role_picks_up_the_layer_from_the_repo(self):
+        # `segura-api` does not say "back" anywhere in its name — that is the
+        # whole reason the alias carries the layer.
+        from comms import presence
+        self.assertEqual(
+            presence.resolve_alias("builder", cwd="/x/segura-api"),
+            "builder-back")
+        self.assertEqual(
+            presence.resolve_alias("builder", cwd="/x/segura-intelligence-front"),
+            "builder-front")
+        self.assertEqual(
+            presence.resolve_alias("orch", cwd="/x/segura-intelligence"),
+            "orch-back")
+        self.assertEqual(
+            presence.resolve_alias("orch", cwd="/x/segura-portal-corretores"),
+            "orch-front")
+
+    def test_a_repo_without_layers_keeps_the_bare_role(self):
+        from comms import presence
+        self.assertEqual(presence.resolve_alias("builder", cwd="/x/comms"),
+                         "builder")
+
+    def test_an_alias_that_names_its_layer_is_taken_as_given(self):
+        from comms import presence
+        self.assertEqual(
+            presence.resolve_alias("builder-front", cwd="/x/segura-api"),
+            "builder-front")
+
+    def test_a_collision_gets_the_next_free_number(self):
+        from comms import presence
+        presence.open("builder-back", session="sess-a")
+        self.assertEqual(
+            presence.resolve_alias("builder", cwd="/x/segura-api",
+                                   session="sess-b"),
+            "builder-back-2")
+        presence.open("builder-back-2", session="sess-b")
+        self.assertEqual(
+            presence.resolve_alias("builder", cwd="/x/segura-api",
+                                   session="sess-c"),
+            "builder-back-3")
+
+    def test_reopening_updates_my_own_row_instead_of_cloning_it(self):
+        # Re-running `comms open` to change the note must not leave the board
+        # holding two rows for one session.
+        from comms import presence
+        presence.open("builder-back", session="sess-a")
+        self.assertEqual(
+            presence.resolve_alias("builder", cwd="/x/segura-api",
+                                   session="sess-a"),
+            "builder-back")
+
+    def test_a_numbered_orchestrator_still_orchestrates(self):
+        from comms import presence
+        self.assertEqual(presence.role_for("orch-back-2"), "orchestrator")
+
     def test_a_prefixed_alias_still_orchestrates(self):
         # One board, two orchestrators — a front and a back for the same
         # project — need distinct aliases, since the alias is the board's key.

@@ -9,6 +9,51 @@ _ALIAS_RE = re.compile(r"^[a-z0-9-]+$")
 def valid_alias(alias: str) -> bool:
     return bool(alias) and bool(_ALIAS_RE.match(alias))
 
+# Which half of a product a repo is. The directory name does not say it —
+# `segura-api` is the portal's backend and nothing in the word "api" tells you
+# so — which is the whole reason the alias carries it.
+LAYER_BY_REPO = {
+    "segura-api": "back",
+    "segura-portal-corretores": "front",
+    "segura-intelligence": "back",
+    "segura-intelligence-front": "front",
+}
+BARE_ROLES = ("orch", "builder")
+
+def layer_for(cwd: str):
+    """`back`, `front`, or None for a repo that does not split that way."""
+    return LAYER_BY_REPO.get(os.path.basename(os.path.realpath(cwd or "")))
+
+def resolve_alias(requested: str, cwd: str = None, session: str = None) -> str:
+    """The alias a session actually joins under.
+
+    Asking for `builder` in `segura-intelligence-front` gets you
+    `builder-front`: the layer is derivable from where you are, so making the
+    human type it is asking for something already known — and the whole point
+    of the alias is to be readable at a glance without checking which repo the
+    tab sits in.
+
+    An alias that already names its layer is taken as given. A collision gets
+    the next free number, whatever caused it: two builders in one repo, or two
+    repos whose bare role resolved the same way.
+
+    `session` is this session's own id. Without it, a session re-running
+    `comms open` to change its note would collide with its OWN row and come
+    back as `builder-back-2`, quietly cloning itself on the board."""
+    alias = requested
+    if requested in BARE_ROLES:
+        layer = layer_for(cwd or os.getcwd())
+        if layer:
+            alias = f"{requested}-{layer}"
+
+    candidate, n = alias, 1
+    while True:
+        entry = store.read_json(paths.presence_file(candidate))
+        if entry is None or (session and entry.get("session") == session):
+            return candidate
+        n += 1
+        candidate = f"{alias}-{n}"
+
 def role_for(alias: str) -> str:
     """`orch`, or any `orch-<something>`, orchestrates. Everyone else builds.
 
