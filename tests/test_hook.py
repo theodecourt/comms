@@ -103,5 +103,89 @@ class HookTest(unittest.TestCase):
         r = self.fire("UserPromptSubmit", session="sess-orch", transcript=big)
         self.assertIn("comms handoff", r.stdout)
 
+    def test_a_spawned_session_joins_the_board_by_itself(self):
+        # comms spawn puts the alias in COMMS_ALIAS; the session should not have
+        # to be told to join. Doing it in the hook rather than the launch line
+        # is what makes the entry joinable against the session registry, since
+        # only this process knows its own session id.
+        from comms import presence
+        env = dict(os.environ, COMMS_ROOT=self.tmp, COMMS_ALIAS="build-7")
+        payload = json.dumps({"session_id": "sess-spawned",
+                              "hook_event_name": "SessionStart",
+                              "cwd": "/tmp/repo", "transcript_path": ""})
+        r = subprocess.run([sys.executable, HOOK], input=payload,
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        entry = [e for e in presence.read_all() if e["alias"] == "build-7"]
+        self.assertEqual(len(entry), 1)
+        self.assertEqual(entry[0]["session"], "sess-spawned")
+        self.assertEqual(entry[0]["cwd"], "/tmp/repo")
+
+    def test_auto_join_never_takes_an_alias_already_on_the_board(self):
+        # Two sessions sharing an alias would fight over one board row, and the
+        # newcomer would silently inherit the other's note and role.
+        from comms import presence
+        env = dict(os.environ, COMMS_ROOT=self.tmp, COMMS_ALIAS="front")
+        payload = json.dumps({"session_id": "sess-impostor",
+                              "hook_event_name": "SessionStart",
+                              "cwd": "/tmp/repo", "transcript_path": ""})
+        subprocess.run([sys.executable, HOOK], input=payload,
+                       capture_output=True, text=True, env=env)
+        front = [e for e in presence.read_all() if e["alias"] == "front"][0]
+        self.assertEqual(front["session"], "sess-1")   # o original, do setUp
+
+    def test_auto_join_ignores_a_junk_alias(self):
+        from comms import presence
+        env = dict(os.environ, COMMS_ROOT=self.tmp, COMMS_ALIAS="BUILDER #1")
+        payload = json.dumps({"session_id": "sess-junk",
+                              "hook_event_name": "SessionStart",
+                              "cwd": "/tmp/repo", "transcript_path": ""})
+        r = subprocess.run([sys.executable, HOOK], input=payload,
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual([e for e in presence.read_all()
+                          if e["alias"] != "front"], [])
+
+    def test_pending_mail_is_announced_on_the_next_turn(self):
+        # This replaces the doorbell for the comms path: no background process,
+        # no re-arming. The notice has to reach the MODEL, and Claude Code only
+        # forwards a hook's stdout into context on UserPromptSubmit and
+        # SessionStart — so it must be printed, not merely computed.
+        from comms import messages
+        messages.post("orch", "olha isso", to="front")
+        for event in ("UserPromptSubmit", "SessionStart"):
+            r = self.fire(event)
+            self.assertIn("comms inbox", r.stdout, event)
+            self.assertIn("orch", r.stdout, event)
+
+    def test_counting_pending_mail_does_not_consume_it(self):
+        # Announcing must not eat the message: the agent still has to run
+        # `comms inbox`, and that run is what marks it seen.
+        from comms import messages
+        messages.post("orch", "olha isso", to="front")
+        self.fire("UserPromptSubmit")
+        self.assertEqual(len(messages.inbox("front", peek=True)), 1)
+
+    def test_no_mail_says_nothing(self):
+        # A notice that fires every turn is a notice nobody reads.
+        r = self.fire("UserPromptSubmit")
+        self.assertNotIn("comms inbox", r.stdout)
+
+    def test_installer_adds_the_sendmessage_hook_with_a_matcher(self):
+        # Sem matcher o hook rodaria em TODA chamada de ferramenta.
+        settings = os.path.join(self.tmp, "settings.json")
+        with open(settings, "w") as fh:
+            json.dump({"hooks": {}}, fh)
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        script = os.path.join(root, "hooks", "install_hooks.py")
+        env = dict(os.environ, COMMS_SETTINGS=settings)
+        p = subprocess.run([sys.executable, script], env=env,
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        with open(settings) as fh:
+            cfg = json.load(fh)
+        groups = cfg["hooks"]["PostToolUse"]
+        self.assertTrue(any(g.get("matcher") == "SendMessage" for g in groups))
+
 if __name__ == "__main__":
     unittest.main()

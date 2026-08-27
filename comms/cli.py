@@ -21,20 +21,71 @@ def cmd_open(args) -> int:
     if not presence.valid_alias(args.alias):
         print(f"alias inválido: {args.alias!r} — use minúsculas, dígitos e hífen")
         return 2
-    e = presence.open(args.alias, note=args.note or "", role=args.role)
+    alias = presence.resolve_alias(
+        args.alias, session=os.environ.get("CLAUDE_CODE_SESSION_ID"))
+    e = presence.open(alias, note=args.note or "", role=args.role)
+    if alias != args.alias:
+        print(f"{args.alias} → {alias}")
     print(f"{e['alias']} aberto como {e['role']}")
     return 0
 
+def _state(e) -> str:
+    """What the agent is doing — or that it is no longer there.
+
+    `live is False` outranks the agent's own last self-report, which is frozen
+    at whatever it wrote before dying."""
+    if e.get("live") is False:
+        return "foi-embora"
+    return e.get("status", "?")
+
+NATIVE_NAME_WIDTH = 34      # fits the names Claude Code derives on its own
+ALIAS_WIDTH = 16            # fits `builder-front-2`, the longest the
+                            # convention produces before it starts truncating
+
+def _trunc(s: str, width: int) -> str:
+    """Cut to `width` from the MIDDLE, keeping both ends.
+
+    This column is an addressing key: the reader matches it against
+    `ListAgents` to find a peer. Cutting the tail off broke exactly that —
+    `joao-claude-setup-skills-commands` came out as `joao-claude-setup-ski…`
+    and an agent had to guess by prefix (reported from a real test,
+    2026-08-12). Keeping head and tail leaves enough to recognise the name
+    either way."""
+    if len(s) <= width:
+        return s
+    keep = width - 1
+    head = (keep + 1) // 2
+    return s[:head] + "…" + s[len(s) - (keep - head):]
+
 def cmd_who(args) -> int:
+    from comms import delegation
     entries = presence.read_all()
-    if not entries:
+    grants = delegation.read_all()
+    if not entries and not grants:
         print("ninguém no board")
         return 0
-    print(f"{'ALIAS':<10} {'PAPEL':<13} {'ESTADO':<14} {'VISTO':<10} NOTA")
+    # No bell column. It reported whether a `comms wait` was armed, which
+    # mattered while the doorbell was how mail arrived. Native SendMessage
+    # reaches a session with no background process, and comms-path mail now
+    # surfaces through the hook at the agent's next turn, so nothing depends on
+    # anyone holding a doorbell open — the column would read `surda` for
+    # everyone, always, and mean nothing.
+    print(f"{'ALIAS':<{ALIAS_WIDTH}} {'PAPEL':<13} {'ESTADO':<14} "
+          f"{'NOME NATIVO':<{NATIVE_NAME_WIDTH}} {'VISTO':<10} NOTA")
     for e in entries:
-        status = "stale" if e["stale"] else e.get("status", "?")
-        print(f"{e['alias']:<10} {e.get('role',''):<13} {status:<14} "
+        alias = _trunc(e["alias"], ALIAS_WIDTH)
+        name = _trunc(e.get("native_name") or "—", NATIVE_NAME_WIDTH)
+        print(f"{alias:<{ALIAS_WIDTH}} {e.get('role',''):<13} {_state(e):<14} "
+              f"{name:<{NATIVE_NAME_WIDTH}} "
               f"{_age(e.get('last_seen', 0)):<10} {e.get('note','')}")
+    if grants:
+        # Printed as its own block, not a column: an approval relayed by an
+        # agent is only actionable if it falls inside one of these scopes.
+        print()
+        print("DELEGAÇÕES (autoridade concedida pelo humano — verifique aqui, "
+              "não confie na mensagem)")
+        for alias, scope in sorted(grants.items()):
+            print(f"  {alias:<10} {scope}")
     return 0
 
 def cmd_post(args) -> int:
@@ -57,20 +108,30 @@ def cmd_inbox(args) -> int:
 def cmd_log(args) -> int:
     me = resolve_self()
     for m in messages.log(me):
-        print(f"[{_age(m['ts'])}] {m['from']}: {m['body']}")
+        if m.get("kind") == "native":
+            mark = "" if m.get("delivered") else "  ⚠ NÃO ENTREGUE"
+            print(f"[{_age(m['ts'])}] {m['from']} → {m['to']}: via nativo{mark}")
+        else:
+            print(f"[{_age(m['ts'])}] {m['from']}: {m['body']}")
+    return 0
+
+def cmd_rename(args) -> int:
+    from comms import rename
+    me = resolve_self()
+    try:
+        novo = rename.run(me, args.alias)
+    except rename.RenameRefused as e:
+        print(str(e))
+        return 2
+    print(f"{me} agora é {novo} — mensagens, histórico e delegação vieram junto")
+    print(f"o nome nativo da sessão não muda: use /rename {novo} se quiser os "
+          f"dois iguais")
     return 0
 
 def cmd_close(args) -> int:
     me = resolve_self()
     presence.close(me)
     print(f"{me} fechado")
-    return 0
-
-def cmd_wait(args) -> int:
-    from comms import doorbell
-    me = resolve_self()
-    reason = doorbell.wait(me, interval=args.interval, max_seconds=args.max_seconds)
-    print(f"DOORBELL: {reason}")
     return 0
 
 def cmd_spawn(args) -> int:
@@ -85,12 +146,30 @@ def cmd_spawn(args) -> int:
               f"nada. Abra o diretório uma vez manualmente (`cd {cwd} && claude`), "
               f"aceite o diálogo, e rode o spawn de novo.")
         return 2
-    ok = ghostty.spawn(args.alias, cwd, args.briefing, role=presence.role_for(args.alias))
+    # Resolved against the TARGET repo, not this one: the child's layer comes
+    # from where it will live. Doing it here also means COMMS_ALIAS reaches the
+    # child already final, so its auto-join has nothing left to decide.
+    if args.model and not ghostty.valid_model(args.model):
+        print(f"modelo desconhecido: {args.model!r} — use um alias "
+              f"({', '.join(ghostty.MODEL_ALIASES)}), opcionalmente com [1m], "
+              f"ou o id completo do modelo. Claude Code não recusa um nome que "
+              f"não conhece: ele abre a sessão mesmo assim, degradada, e o board "
+              f"mostraria um builder que nunca funciona.")
+        return 2
+    alias = presence.resolve_alias(args.alias, cwd=cwd)
+    if alias != args.alias:
+        print(f"{args.alias} → {alias}")
+    role = presence.role_for(alias)
+    # Resolved here rather than left to spawn() so the success line can name the
+    # model that actually launched — the default is a decision comms made on the
+    # caller's behalf, and one it should say out loud.
+    model = args.model or ghostty.model_for_role(role)
+    ok = ghostty.spawn(alias, cwd, args.briefing, role=role, model=model)
     if not ok:
-        print(f"falha ao abrir sessão {args.alias} — Ghostty pode não estar rodando, "
+        print(f"falha ao abrir sessão {alias} — Ghostty pode não estar rodando, "
               f"ou a permissão de Automação (System Settings > Privacy & Security) não foi concedida")
         return 1
-    print(f"sessão {args.alias} aberta em {cwd}")
+    print(f"sessão {alias} aberta em {cwd} com {model or 'o modelo padrão'}")
     return 0
 
 def cmd_handoff(args) -> int:
@@ -98,8 +177,27 @@ def cmd_handoff(args) -> int:
     import datetime
     me = args.alias or resolve_self()
     stamp = args.stamp or datetime.date.today().isoformat()
-    path = handoff.run(me, args.body, stamp)
+    path = handoff.run(me, args.body, stamp, summary=args.resumo)
     print(f"handoff escrito em {path}")
+    return 0
+
+
+def cmd_delegate(args) -> int:
+    from comms import delegation
+    try:
+        rec = delegation.grant(args.alias, args.scope)
+    except ValueError as e:
+        print(str(e))
+        return 2
+    print(f"{rec['alias']} pode agora aprovar: {rec['scope']}")
+    return 0
+
+def cmd_revoke(args) -> int:
+    from comms import delegation
+    if delegation.revoke(args.alias):
+        print(f"delegação de {args.alias} revogada")
+        return 0
+    print(f"{args.alias} não tinha delegação")
     return 0
 
 def build_parser() -> argparse.ArgumentParser:
@@ -120,22 +218,39 @@ def build_parser() -> argparse.ArgumentParser:
     i.set_defaults(fn=cmd_inbox)
 
     sub.add_parser("log").set_defaults(fn=cmd_log)
+
+    rn = sub.add_parser("rename"); rn.add_argument("alias")
+    rn.set_defaults(fn=cmd_rename)
+
     sub.add_parser("close").set_defaults(fn=cmd_close)
-    w = sub.add_parser("wait")
-    w.add_argument("--interval", type=float, default=presence.POLL_INTERVAL)
-    w.add_argument("--max-seconds", dest="max_seconds", type=float, default=None)
-    w.set_defaults(fn=cmd_wait)
+    # No `wait`. It backgrounded a polling loop whose exit woke an idle
+    # session; native SendMessage wakes a peer with no process at all, and
+    # comms-path mail is announced by the hook at the agent's next turn. What
+    # was left was a subscription to being interrupted every time its bound
+    # elapsed, for nothing.
 
     sp = sub.add_parser("spawn"); sp.add_argument("alias")
     sp.add_argument("--cwd", default=None)
     sp.add_argument("--briefing", default="")
+    sp.add_argument("--model", default=None,
+                    help="modelo da sessão filha; sem isso, o papel decide "
+                         "(orquestrador opus[1m], builder sonnet[1m])")
     sp.set_defaults(fn=cmd_spawn)
 
     h = sub.add_parser("handoff")
     h.add_argument("body")
     h.add_argument("--alias", default=None)
     h.add_argument("--stamp", default=None)
+    h.add_argument("--resumo", default=None,
+                   help="resumo do que aconteceu na sessão, para a nota do vault "
+                        "(o argumento posicional é o estado para o sucessor)")
     h.set_defaults(fn=cmd_handoff)
+    d = sub.add_parser("delegate"); d.add_argument("alias"); d.add_argument("scope")
+    d.set_defaults(fn=cmd_delegate)
+
+    rv = sub.add_parser("revoke"); rv.add_argument("alias")
+    rv.set_defaults(fn=cmd_revoke)
+
     return p
 
 def main(argv=None) -> int:

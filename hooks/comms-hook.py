@@ -49,6 +49,22 @@ def main() -> int:
         if entry.get("session") == session:
             alias = entry["alias"]
             break
+
+    if alias is None and name == "SessionStart":
+        # A spawned session carries its alias in COMMS_ALIAS, so it can join
+        # the board by itself and does not have to be told to. Doing it here
+        # rather than in the launch line is what makes the entry usable: only
+        # this process knows CLAUDE_CODE_SESSION_ID, and without that id the
+        # entry cannot be joined against Claude Code's session registry —
+        # which is where liveness and the addressing name come from.
+        wanted = os.environ.get("COMMS_ALIAS") or ""
+        if presence.valid_alias(wanted):
+            taken = {e["alias"] for e in presence.read_all()}
+            if wanted not in taken:
+                presence.open(wanted, role=os.environ.get("COMMS_ROLE") or None,
+                              session=session, cwd=event.get("cwd") or None)
+                alias = wanted
+
     if alias is None:
         return 0        # session never joined the board
 
@@ -58,6 +74,25 @@ def main() -> int:
 
     status = STATUS_BY_EVENT.get(name)
     presence.touch(alias, status=status)
+
+    if name in ("UserPromptSubmit", "SessionStart"):
+        # Mail on the comms path — a broadcast, or a fallback from a failed
+        # native send — used to be announced by the doorbell: a background
+        # process whose exit woke the session. That cost a wake-up every time
+        # its bound elapsed, whether or not anything had arrived, and it was
+        # reaped without warning besides. Anything urgent now travels by
+        # native SendMessage, which wakes a peer with no background process at
+        # all, so the comms path no longer needs one either: it can wait for
+        # the agent's next turn, which is exactly when this hook runs.
+        from comms import messages
+        # peek: counting must not consume. The agent still has to run
+        # `comms inbox` to read, and that is what marks the mail as seen.
+        waiting = messages.inbox(alias, peek=True)
+        if waiting:
+            senders = ", ".join(sorted({m["from"] for m in waiting}))
+            plural = "ns" if len(waiting) != 1 else "m"
+            print(f"✉ {len(waiting)} mensage{plural} no comms, de {senders} "
+                  f"— rode `comms inbox`")
 
     if name == "UserPromptSubmit":
         # Claude Code only forwards a hook's stdout into the model's context

@@ -72,5 +72,35 @@ class MessagesTest(unittest.TestCase):
         bodies = [m["body"] for m in messages.inbox("front")]
         self.assertEqual(bodies, ["m0", "m1", "m2", "m3", "m4"])
 
+    def test_record_native_writes_the_fact_to_both_sides(self):
+        from comms import messages
+        messages.record_native("orch", "builder", alias="builder",
+                               delivered=True, msg_id="abc123")
+        for who in ("orch", "builder"):
+            rec = messages.log(who)[-1]
+            self.assertEqual(rec["kind"], "native")
+            self.assertEqual(rec["from"], "orch")
+            self.assertEqual(rec["to"], "builder")
+            self.assertTrue(rec["delivered"])
+            self.assertNotIn("body", rec)
+
+    def test_record_native_off_board_only_touches_the_sender(self):
+        # Sem alias não existe log do outro lado; omitir seria perder o fato.
+        from comms import messages
+        messages.record_native("orch", "alguma-sessao", alias=None,
+                               delivered=True, msg_id="x")
+        rec = messages.log("orch")[-1]
+        self.assertEqual(rec["to"], "alguma-sessao")
+        self.assertTrue(rec["off_board"])
+        self.assertEqual(messages.log("alguma-sessao"), [])
+
+    def test_a_failed_send_is_recorded_as_not_delivered(self):
+        # O agente é quem faz o fallback; se esquecer, o esquecimento fica
+        # visível aqui em vez de sumir.
+        from comms import messages
+        messages.record_native("orch", "builder", alias="builder",
+                               delivered=False, msg_id="")
+        self.assertFalse(messages.log("orch")[-1]["delivered"])
+
 if __name__ == "__main__":
     unittest.main()

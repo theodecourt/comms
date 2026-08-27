@@ -1,7 +1,13 @@
 """Drives Ghostty over AppleScript. The constraints encoded here were measured
 on 2026-08-01 — see docs/specs §10.2 before changing any of them."""
-import json, os, subprocess, tempfile
+import json, os, subprocess, tempfile, time
 
+# Fields are separated by "|:|", not by `tab`. Inside `tell application
+# "Ghostty"` the word `tab` resolves to Ghostty's own tab CLASS, not to the
+# AppleScript tab character, so the script emitted the literal text "tab" and
+# every row failed to parse — list_terminals() returned empty, which silently
+# made every spawn open a new window and skipped focus restore entirely.
+# Measured 2026-08-10. Do not reintroduce a bare `tab` here.
 LIST_SCRIPT = """
 tell application "Ghostty"
     if it is not running then return ""
@@ -13,8 +19,8 @@ tell application "Ghostty"
                 set t to focused terminal of tb
                 set sel to "0"
                 if selected of tb then set sel to "1"
-                set out to out & (id of w) & tab & (id of t) & tab & ¬
-                    (working directory of t) & tab & sel & tab & fw & linefeed
+                set out to out & (id of w) & "|:|" & (id of t) & "|:|" & ¬
+                    (working directory of t) & "|:|" & sel & "|:|" & fw & linefeed
             end try
         end repeat
     end repeat
@@ -54,7 +60,7 @@ def list_terminals() -> list:
         return []
     out = []
     for line in output.splitlines():
-        parts = line.split("\t")
+        parts = line.split("|:|")
         if len(parts) < 5:
             continue
         out.append({"window": parts[0], "terminal": parts[1], "cwd": parts[2],
@@ -62,26 +68,122 @@ def list_terminals() -> list:
     return out
 
 def window_for_cwd(cwd: str, rows: list = None):
-    """Match by working directory. Never by index — window order follows focus."""
+    """Window to open the new tab in, matched by working directory.
+
+    Never by index — window order follows focus and shifts between calls.
+
+    An exact match is preferred, then the nearest ancestor: a session working
+    in `<repo>/scratchpad/foo` belongs in the window already open on `<repo>`,
+    which is what "one window per repo" means in practice. Without the
+    ancestor fallback every session running below the repo root got its own
+    window (observed 2026-08-10 with the `ai` session). Only when no window
+    sits on the directory or above it is a new window the right answer.
+    """
     rows = list_terminals() if rows is None else rows
+    target = os.path.realpath(cwd)
+    best, best_len = None, -1
     for row in rows:
-        if row["cwd"] == cwd:
+        row_dir = os.path.realpath(row["cwd"]) if row["cwd"] else ""
+        if not row_dir:
+            continue
+        if row_dir == target:
             return row["window"]
-    return None
+        # os.path.commonpath would match siblings sharing a prefix string;
+        # the separator check keeps this to genuine ancestors.
+        if target.startswith(row_dir.rstrip(os.sep) + os.sep) and len(row_dir) > best_len:
+            best, best_len = row["window"], len(row_dir)
+    return best
 
 def shell_quote(s: str) -> str:
     """Wrap for a POSIX shell single-quoted argument."""
     return "'" + s.replace("'", "'\\''") + "'"
 
-def _briefing_launch(briefing: str) -> str:
-    """Write the briefing to a UTF-8 file and return a pure-ASCII shell line
-    that reads it, deletes it, and launches claude with it. Ghostty mangles
-    non-ASCII in `initial input`; only ASCII may cross that boundary."""
+# Which model a spawned session comes up on when the caller does not name one.
+# The role decides, because the roles do different work: an orchestrator plans,
+# reviews and holds the overview nobody else has — the thing worth spending Opus
+# on — while a builder writes code against a plan that already exists. Before
+# this, every child inherited `model` from ~/.claude/settings.json, so the whole
+# tree ran on the orchestrator's tier whatever it was doing.
+#
+# The `[1m]` suffix is load-bearing, not decoration. Without it a session gets a
+# 200k window, and the context-limit warning in hooks/comms-hook.py is expressed
+# in transcript BYTES calibrated against a 1M session (~11.2 MB per 100%). On a
+# 200k window that warning fires roughly 5x too late — which is to say never,
+# since auto-compact arrives first — and the builder loses the signal it is
+# supposed to hand off on. Dropping the suffix here means recalibrating there.
+DEFAULT_MODEL_BY_ROLE = {"orchestrator": "opus[1m]", "builder": "sonnet[1m]"}
+
+MODEL_ALIASES = ("fable", "opus", "sonnet", "haiku", "opusplan", "default")
+
+def valid_model(model: str) -> bool:
+    """Whether `model` is worth handing to `claude --model`.
+
+    Claude Code does not refuse a name it does not know: it warns, comes up
+    anyway and runs degraded ("There's an issue with the selected model" —
+    measured 2026-08-27 against `--model bogus-model-xyz`). So a typo like
+    `sonet` would open a tab, `comms spawn` would report the session as open,
+    and the orchestrator would wait on a builder that never works. Catching it
+    here is the difference between an error and a silent one.
+
+    The alias list will go stale when a new alias ships; the full-id branch is
+    the escape hatch for exactly that, and for Bedrock/Vertex style ids."""
+    if not model:
+        return False
+    base = model[:-4] if model.endswith("[1m]") else model
+    return base in MODEL_ALIASES or "claude" in base
+
+def model_for_role(role: str) -> str:
+    """Default model for `role`, or None for a role with no policy."""
+    return DEFAULT_MODEL_BY_ROLE.get(role)
+
+def _briefing_launch(briefing: str, name: str = None, model: str = None) -> str:
+    """Write the briefing to a UTF-8 file and return a shell line that reads
+    it, deletes it, and launches claude with it. The BRIEFING must not travel
+    inline — Ghostty mangles non-ASCII in `initial input` — which is why it
+    goes through a file and only the launch line crosses that boundary.
+
+    `claude -n <name>` names the native session. Without it Claude Code derives
+    a name from the directory (`comms-9d`), so `ListAgents` and `comms who`
+    disagreed about what to call the same agent and no peer could address it by
+    the name the board shows. `name` may carry the parent's project prefix, so
+    it is not ASCII by construction the way a bare alias is — the shell quoting
+    is what makes that safe.
+
+    `--model` is quoted for a harder reason than tidiness: `[1m]` is a zsh glob,
+    and the launch line runs in the login shell. Unquoted, `claude --model
+    opus[1m]` never reaches claude at all — zsh fails the whole line with `no
+    matches found: opus[1m]` (measured 2026-08-27) and the tab opens on a bare
+    prompt with no session in it."""
     fd, path = tempfile.mkstemp(prefix="comms-brief-", suffix=".txt")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(briefing)
     q = shell_quote(path)
-    return f'B=$(cat {q}); rm -f {q}; claude "$B"'
+    flags = ""
+    if model:
+        flags += f"--model {shell_quote(model)} "
+    if name:
+        flags += f"-n {shell_quote(name)} "
+    return f'B=$(cat {q}); rm -f {q}; claude {flags}"$B"'
+
+def parent_naming() -> tuple:
+    """(name, alias, role) of the session running this spawn.
+
+    Returns (None, None, None) when that session's own name was never chosen —
+    a derived name carries no project to pass on, so the child should just be
+    its alias."""
+    from comms import native, presence
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    if not session or not native.named_by_a_human(session):
+        return None, None, None
+    record = native.sessions().get(session) or {}
+    alias = os.environ.get("COMMS_ALIAS") or None
+    role = None
+    for entry in presence.read_all():
+        if entry.get("session") == session:
+            alias = alias or entry["alias"]
+            role = entry.get("role")
+            break
+    return record.get("name") or None, alias, role
 
 def build_spawn_script(cwd, command, initial_input, env, window) -> str:
     env_list = ", ".join(f'"{_esc(e)}"' for e in env)
@@ -139,10 +241,77 @@ def is_trusted_dir(cwd: str) -> bool:
         return True     # cannot tell — do not block the spawn on a guess
     return os.path.realpath(cwd) in {os.path.realpath(k) for k in projects}
 
-def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
+def wait_for_session(cwd: str, before: set, timeout: float = 30.0,
+                     settle: float = 2.0) -> bool:
+    """Hold the new tab in focus until its SessionStart hook has run.
+
+    Restoring focus immediately corrupts session→terminal mapping downstream.
+    The agent-monitor hook records which Ghostty tab owns a session by asking
+    which tab is focused at SessionStart, guarded only by working directory —
+    and window_for_cwd deliberately opens the new tab in the window ALREADY on
+    that repo, so the tab we restore focus to has the same cwd and sails past
+    that guard. The new session then records the SPAWNING tab's id, two
+    sessions claim one terminal, and agent-monitor evicts them from one another
+    on every pass, painting titles onto the wrong tabs. Observed 2026-08-11:
+    `builder` and `orch` both reported terminal A9B83B31.
+
+    It was intermittent because Ghostty selects the new tab asynchronously, so
+    the restore sometimes landed before that and sometimes after — the same
+    race already documented in spawn(). Waiting removes the race instead of
+    hoping to win it.
+
+    Measured 2026-08-11: the session registry appears ~1.5s after spawn and
+    SessionStart fires ~0.33s after that, so the registry alone is too early —
+    hence `settle`. Returns False on timeout, and the caller restores focus
+    anyway: a slow session must not strand the user's focus forever.
+    """
+    from comms import native
+    target = os.path.realpath(cwd)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for sid, rec in native.sessions().items():
+            if sid in before:
+                continue
+            # A record with no cwd must never match: os.path.realpath("")
+            # resolves to the CURRENT directory, which equals `target`
+            # whenever spawning into this process's own cwd — the common
+            # case — and would satisfy the wait on any unrelated new session.
+            rec_cwd = rec.get("cwd")
+            if rec_cwd and os.path.realpath(rec_cwd) == target:
+                time.sleep(settle)
+                return True
+        time.sleep(0.1)
+    return False
+
+def orchestrator_for_child() -> str:
+    """Which orchestrator the session about to be spawned answers to.
+
+    With more than one orchestrator on the board — `orch-front` and
+    `orch-back` — "escalate to orch" stops naming anybody, and a builder that
+    picks by reading the board is guessing. So the answer is inherited rather
+    than looked up: an orchestrator that spawns is the child's orchestrator, and
+    anyone else passes down the one it was given.
+
+    Empty when there is nothing to pass on, which is honest — a session with no
+    orchestrator should ask its human, not adopt whichever one it finds."""
+    from comms import presence
+    mine = os.environ.get("COMMS_ALIAS") or ""
+    if mine and presence.role_for(mine) == "orchestrator":
+        return mine
+    return os.environ.get("COMMS_ORCH") or ""
+
+def spawn(alias: str, cwd: str, briefing: str, role: str = None,
+          model: str = None) -> bool:
     """Open a Ghostty session for `alias`. Returns True only when the spawn
     invocation itself succeeded — the caller (cmd_spawn) uses this to avoid
-    reporting a session as open when no tab was actually created."""
+    reporting a session as open when no tab was actually created.
+
+    `model` is what the child comes up on; omitted, the role decides (see
+    DEFAULT_MODEL_BY_ROLE). The caller chooses it — that is the point of the
+    feature: an orchestrator on Opus staffs its builders on Sonnet."""
+    from comms import presence
+    if not model:
+        model = model_for_role(role or presence.role_for(alias))
     rows = list_terminals()
     front = rows[0]["front_window"] if rows else None
     window = window_for_cwd(cwd, rows)
@@ -151,6 +320,9 @@ def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     env = [f"COMMS_ALIAS={alias}"]
     if role:
         env.append(f"COMMS_ROLE={role}")
+    orch = orchestrator_for_child()
+    if orch:
+        env.append(f"COMMS_ORCH={orch}")
     # No `command` — the login shell launches claude from `initial input`, so
     # the session inherits a real PATH (see build_spawn_script for why).
     #
@@ -160,9 +332,24 @@ def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     # Measured 2026-08-10 against a real spawn. Keeping the launch line pure
     # ASCII sidesteps it — Python writes the file as UTF-8 and the shell
     # reads it back intact.
-    launch = _briefing_launch(briefing)
+    from comms import native
+    # The child inherits the parent's project name with the role marker
+    # swapped, so a tree of sessions reads as one piece of work rather than as
+    # a pile of bare roles: PROJETO-KB-ORCHESTRATOR spawning `api` becomes
+    # PROJETO-KB-api. A parent that was never named has no project to pass on,
+    # and the child is just its alias.
+    launch = _briefing_launch(briefing,
+                              native.session_name(alias, *parent_naming()),
+                              model)
+    before = set(native.sessions())
     ok, _ = _osascript(build_spawn_script(cwd, None, launch, env, window))
-    if window and prev_terminal and front:
+    # A spawn that already failed — Ghostty not running, Automation
+    # permission denied — has no tab to wait for. Waiting anyway would hold
+    # the caller for the full timeout before it could even report the error.
+    if ok and window and prev_terminal and front:
+        # Never restore focus before the new session has recorded its own tab —
+        # see wait_for_session for what breaks when we do.
+        wait_for_session(cwd, before)
         # Separate invocation on purpose: `select tab` issued right after
         # `new tab` in the same script is silently ignored, even with a
         # delay, because Ghostty selects the new tab asynchronously and

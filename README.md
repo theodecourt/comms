@@ -19,7 +19,7 @@ separate, deliberate decision the hook stays opt-in.
 
 Sessions talk to `comms` the way they'd talk to `git` — the agent runs the
 commands, not the human. See `skills/open-comms/SKILL.md` for the full
-protocol: joining, the doorbell/re-arm cycle, roles, routing, and the rule
+protocol: joining, how mail reaches a session, roles, routing, and the rule
 that messages are data, never instructions.
 
 ```
@@ -27,9 +27,8 @@ comms open <alias> [--role <role>] [--note "..."]
 comms who
 comms post --to <alias> "msg"      (no --to = broadcast)
 comms inbox [--peek]               (--peek doesn't consume)
-comms wait                         (run in background = the doorbell)
 comms log
-comms spawn <alias>
+comms spawn <alias> [--model <m>]  (default: orch opus[1m], builder sonnet[1m])
 comms handoff "<state>"
 comms close
 ```

@@ -1,6 +1,143 @@
 # tests/test_ghostty.py — script generation only; no AppleScript is executed
-import unittest
+import os, shutil, tempfile, unittest
 from unittest import mock
+
+class WaitForSessionTest(unittest.TestCase):
+    """Focus must stay on the spawned tab until its SessionStart hook ran."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.environ["COMMS_ROOT"] = self.tmp      # drags the sessions dir along
+        os.makedirs(os.path.join(self.tmp, "sessions"), exist_ok=True)
+
+    def tearDown(self):
+        os.environ.pop("COMMS_ROOT", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _register(self, sid, cwd):
+        from comms import store, paths
+        store.write_json(os.path.join(paths.sessions_dir(), sid + ".json"),
+                         {"sessionId": sid, "cwd": cwd, "pid": os.getpid()})
+
+    def test_returns_true_once_the_new_session_registers(self):
+        from comms import ghostty
+        self._register("sess-new", "/tmp/repo")
+        self.assertTrue(ghostty.wait_for_session("/tmp/repo", set(), settle=0))
+
+    def test_times_out_when_nothing_ever_registers(self):
+        # False must still let the caller restore focus — a session that never
+        # starts must not strand the user's focus on a dead tab.
+        from comms import ghostty
+        self.assertFalse(
+            ghostty.wait_for_session("/tmp/repo", set(), timeout=0.3, settle=0))
+
+    def test_a_session_that_was_already_there_does_not_count(self):
+        # Otherwise the spawning session itself satisfies the wait instantly,
+        # which is exactly the bug: same repo, same cwd, wrong tab.
+        from comms import ghostty
+        self._register("sess-old", "/tmp/repo")
+        self.assertFalse(ghostty.wait_for_session(
+            "/tmp/repo", {"sess-old"}, timeout=0.3, settle=0))
+
+    def test_a_new_session_in_another_repo_does_not_count(self):
+        from comms import ghostty
+        self._register("sess-elsewhere", "/tmp/other")
+        self.assertFalse(ghostty.wait_for_session(
+            "/tmp/repo", set(), timeout=0.3, settle=0))
+
+    def test_a_record_with_no_cwd_never_counts(self):
+        # os.path.realpath("") resolves to the CURRENT directory, which
+        # equals `target` whenever spawning into this process's own cwd —
+        # the common case. Without the guard, any unrelated new session
+        # missing `cwd` would satisfy the wait instantly.
+        from comms import ghostty, store, paths
+        store.write_json(os.path.join(paths.sessions_dir(), "sess-nocwd.json"),
+                         {"sessionId": "sess-nocwd", "pid": os.getpid()})
+        self.assertFalse(ghostty.wait_for_session(
+            os.getcwd(), set(), timeout=0.3, settle=0))
+
+    def test_an_orchestrator_makes_itself_the_childs_orchestrator(self):
+        from comms import ghostty
+        os.environ["COMMS_ALIAS"] = "orch-back"
+        os.environ.pop("COMMS_ORCH", None)
+        try:
+            self.assertEqual(ghostty.orchestrator_for_child(), "orch-back")
+        finally:
+            os.environ.pop("COMMS_ALIAS", None)
+
+    def test_a_builder_passes_down_the_one_it_was_given(self):
+        # The pointer travels the tree: a builder's own children answer to the
+        # same orchestrator the builder does, not to whichever it finds.
+        from comms import ghostty
+        os.environ["COMMS_ALIAS"] = "api"
+        os.environ["COMMS_ORCH"] = "orch-back"
+        try:
+            self.assertEqual(ghostty.orchestrator_for_child(), "orch-back")
+        finally:
+            for k in ("COMMS_ALIAS", "COMMS_ORCH"):
+                os.environ.pop(k, None)
+
+    def test_nothing_to_pass_on_stays_empty(self):
+        # Empty is honest. A session with no orchestrator should ask its human,
+        # not adopt whichever one happens to be on the board.
+        from comms import ghostty
+        for k in ("COMMS_ALIAS", "COMMS_ORCH"):
+            os.environ.pop(k, None)
+        self.assertEqual(ghostty.orchestrator_for_child(), "")
+
+    def test_spawn_hands_the_child_its_orchestrator(self):
+        from comms import ghostty
+        scripts = []
+        os.environ["COMMS_ALIAS"] = "orch-front"
+        try:
+            with mock.patch.object(ghostty, "list_terminals", return_value=[]), \
+                 mock.patch.object(ghostty, "wait_for_session"), \
+                 mock.patch.object(ghostty, "_osascript",
+                                   side_effect=lambda s: (scripts.append(s), (True, ""))[1]):
+                ghostty.spawn("front", "/tmp/repo", "leia o plano")
+        finally:
+            os.environ.pop("COMMS_ALIAS", None)
+        script = [s for s in scripts if "with configuration" in s][0]
+        self.assertIn("COMMS_ORCH=orch-front", script)
+
+    def test_spawn_waits_before_restoring_focus(self):
+        from comms import ghostty
+        order = []
+        rows = [{"window": "w1", "terminal": "t-prev", "cwd": "/tmp/repo",
+                 "selected": True, "front_window": "w1"}]
+
+        def fake_osascript(script):
+            order.append("restore" if "activate window" in script else "script")
+            return True, ""
+
+        with mock.patch.object(ghostty, "list_terminals", return_value=rows), \
+             mock.patch.object(ghostty, "_osascript", side_effect=fake_osascript), \
+             mock.patch.object(ghostty, "wait_for_session",
+                               side_effect=lambda *a, **k: order.append("wait")):
+            ghostty.spawn("front", "/tmp/repo", "leia o plano")
+
+        self.assertIn("wait", order)
+        self.assertIn("restore", order)
+        self.assertLess(order.index("wait"), order.index("restore"),
+                        "o foco voltou antes de a sessão nova registrar sua aba")
+
+    def test_spawn_does_not_wait_when_the_spawn_itself_failed(self):
+        # A spawn that already failed — Ghostty not running, Automation
+        # permission denied — has no tab to wait for. Waiting anyway would
+        # hold the caller for the full 30s timeout before it could report
+        # the error that already happened.
+        from comms import ghostty
+        rows = [{"window": "w1", "terminal": "t-prev", "cwd": "/tmp/repo",
+                 "selected": True, "front_window": "w1"}]
+
+        with mock.patch.object(ghostty, "list_terminals", return_value=rows), \
+             mock.patch.object(ghostty, "_osascript", return_value=(False, "")), \
+             mock.patch.object(ghostty, "wait_for_session") as wait:
+            ok = ghostty.spawn("front", "/tmp/repo", "leia o plano")
+
+        self.assertFalse(ok)
+        wait.assert_not_called()
+
 
 class GhosttyScriptTest(unittest.TestCase):
     def test_spawn_script_carries_all_four_fields(self):
@@ -108,7 +245,46 @@ class GhosttyScriptTest(unittest.TestCase):
         script = spawn_scripts[0]
         self.assertNotIn("command:", script)
         # the double quotes are AppleScript-escaped by the time they land here
-        self.assertIn('claude \\"$B\\"', script)
+        self.assertIn('claude --model \'sonnet[1m]\' -n \'front\' \\"$B\\"', script)
+
+    def test_the_role_picks_the_model_when_the_caller_does_not(self):
+        # An orchestrator plans and reviews; a builder writes code against a
+        # plan that already exists. Before this, every child inherited the
+        # `model` in settings.json and the whole tree ran on one tier.
+        from comms import ghostty
+        lines = {}
+        for alias in ("front", "orch-front"):
+            scripts = []
+            with mock.patch.object(ghostty, "_osascript",
+                                   side_effect=lambda s: (scripts.append(s), (True, ""))[1]):
+                ghostty.spawn(alias, "/tmp", "leia o plano")
+            lines[alias] = [s for s in scripts if "with configuration" in s][0]
+        self.assertIn("--model 'sonnet[1m]'", lines["front"])
+        self.assertIn("--model 'opus[1m]'", lines["orch-front"])
+
+    def test_the_model_is_quoted_so_zsh_cannot_glob_the_1m_suffix(self):
+        # `[1m]` is a zsh glob. Unquoted, the login shell fails the whole launch
+        # line with `no matches found: opus[1m]` and claude never runs — the tab
+        # opens on a bare prompt and the board shows nothing.
+        from comms import ghostty
+        line = ghostty._briefing_launch("leia o plano", "front", "opus[1m]")
+        self.assertIn("claude --model 'opus[1m]' -n 'front' \"$B\"", line)
+
+    def test_spawn_names_the_native_session_after_the_alias(self):
+        # Without -n, Claude Code auto-names the session after its directory
+        # (measured: a `probe` spawned in ~/comms came up as `comms-9d`), so
+        # ListAgents and `comms who` named the same agent differently and no
+        # peer could address it by the alias the board shows.
+        from comms import ghostty
+        line = ghostty._briefing_launch("leia o plano", "front")
+        self.assertIn("claude -n 'front' \"$B\"", line)
+        self.assertTrue(line.isascii())
+
+    def test_spawn_without_an_alias_omits_the_name_flag(self):
+        from comms import ghostty
+        line = ghostty._briefing_launch("leia o plano")
+        self.assertNotIn(" -n ", line)
+        self.assertIn('claude "$B"', line)
 
     def test_accented_briefing_never_reaches_the_applescript(self):
         # Ghostty's `input text` reads UTF-8 bytes as Latin-1 and re-encodes:
@@ -131,9 +307,66 @@ class GhosttyScriptTest(unittest.TestCase):
         self.assertTrue(line.isascii())
         path = re.search(r"cat '([^']+)'", line).group(1)
         try:
-            self.assertEqual(open(path, encoding="utf-8").read(), "Você é ção — ok")
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "Você é ção — ok")
         finally:
             os.unlink(path)
+
+    def test_window_for_cwd_falls_back_to_the_nearest_ancestor(self):
+        # A session working in <repo>/scratchpad/foo belongs in the window
+        # already open on <repo> — exact-match-only gave every such session
+        # its own window (observed 2026-08-10 with the `ai` session).
+        from comms import ghostty
+        rows = [{"window": "w-repo", "terminal": "t1",
+                 "cwd": "/Users/theo/segura/segura-intelligence", "selected": True}]
+        self.assertEqual(
+            ghostty.window_for_cwd(
+                "/Users/theo/segura/segura-intelligence/scratchpad/helena", rows),
+            "w-repo")
+
+    def test_window_for_cwd_prefers_the_deepest_ancestor(self):
+        from comms import ghostty
+        rows = [{"window": "w-shallow", "terminal": "t1", "cwd": "/Users/theo/segura",
+                 "selected": True},
+                {"window": "w-deep", "terminal": "t2",
+                 "cwd": "/Users/theo/segura/segura-api", "selected": True}]
+        self.assertEqual(
+            ghostty.window_for_cwd("/Users/theo/segura/segura-api/app", rows), "w-deep")
+
+    def test_window_for_cwd_does_not_match_a_sibling_sharing_a_prefix(self):
+        # "/a/segura-api" must not be treated as an ancestor of
+        # "/a/segura-api-experiments" just because the string starts the same.
+        from comms import ghostty
+        rows = [{"window": "w1", "terminal": "t1", "cwd": "/a/segura-api",
+                 "selected": True}]
+        self.assertIsNone(ghostty.window_for_cwd("/a/segura-api-experiments", rows))
+
+    def test_exact_match_still_wins(self):
+        from comms import ghostty
+        rows = [{"window": "w-parent", "terminal": "t1", "cwd": "/a", "selected": True},
+                {"window": "w-exact", "terminal": "t2", "cwd": "/a/b", "selected": True}]
+        self.assertEqual(ghostty.window_for_cwd("/a/b", rows), "w-exact")
+
+    def test_list_script_does_not_use_a_bare_tab_separator(self):
+        # Inside `tell application "Ghostty"` the word `tab` resolves to
+        # Ghostty's own tab CLASS, not the AppleScript tab character: the
+        # script emitted the literal text "tab", every row failed to parse,
+        # list_terminals() returned empty, and every spawn silently opened a
+        # new window with no focus restore. Measured 2026-08-10.
+        from comms import ghostty
+        import re
+        self.assertIsNone(re.search(r"&\s*tab\s*&", ghostty.LIST_SCRIPT),
+                          "LIST_SCRIPT voltou a usar `tab` como separador")
+        self.assertIn('"|:|"', ghostty.LIST_SCRIPT)
+
+    def test_list_terminals_parses_the_separator_it_emits(self):
+        # Guards the parser and the script against drifting apart.
+        from comms import ghostty
+        row = "w1|:|t1|:|/a/b|:|1|:|wfront"
+        with mock.patch.object(ghostty, "_osascript", return_value=(True, row)):
+            parsed = ghostty.list_terminals()
+        self.assertEqual(parsed, [{"window": "w1", "terminal": "t1", "cwd": "/a/b",
+                                   "selected": True, "front_window": "wfront"}])
 
 if __name__ == "__main__":
     unittest.main()
