@@ -28,7 +28,7 @@ comms who
 comms post --to <alias> "msg"      (no --to = broadcast)
 comms inbox [--peek]               (--peek doesn't consume)
 comms log
-comms spawn <alias>
+comms spawn <alias> [--model <m>]  (default: orch opus[1m], builder sonnet[1m])
 comms handoff "<state>"
 comms close
 ```

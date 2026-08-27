@@ -174,6 +174,18 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("nunca foi aberto", out)
 
+    def test_spawn_refuses_a_model_claude_code_would_not_recognize(self):
+        # Claude Code não recusa um nome desconhecido: ele abre a sessão
+        # degradada. Um `sonet` digitado errado abriria a aba, o spawn diria
+        # "aberta", e o orquestrador esperaria por um builder que nunca funciona.
+        from unittest import mock
+        with mock.patch("comms.ghostty.is_trusted_dir", return_value=True), \
+             mock.patch("comms.ghostty.spawn") as spawned:
+            code, out = run("spawn", "build-1", "--cwd", "/tmp", "--model", "sonet")
+        self.assertEqual(code, 2)
+        self.assertIn("modelo desconhecido", out)
+        spawned.assert_not_called()
+
     def test_who_shows_the_native_name_for_addressing(self):
         # É por esse nome que o agente endereça o SendMessage; sem ele o board
         # diz com quem falar e não diz como.

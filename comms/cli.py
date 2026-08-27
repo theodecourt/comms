@@ -149,15 +149,27 @@ def cmd_spawn(args) -> int:
     # Resolved against the TARGET repo, not this one: the child's layer comes
     # from where it will live. Doing it here also means COMMS_ALIAS reaches the
     # child already final, so its auto-join has nothing left to decide.
+    if args.model and not ghostty.valid_model(args.model):
+        print(f"modelo desconhecido: {args.model!r} — use um alias "
+              f"({', '.join(ghostty.MODEL_ALIASES)}), opcionalmente com [1m], "
+              f"ou o id completo do modelo. Claude Code não recusa um nome que "
+              f"não conhece: ele abre a sessão mesmo assim, degradada, e o board "
+              f"mostraria um builder que nunca funciona.")
+        return 2
     alias = presence.resolve_alias(args.alias, cwd=cwd)
     if alias != args.alias:
         print(f"{args.alias} → {alias}")
-    ok = ghostty.spawn(alias, cwd, args.briefing, role=presence.role_for(alias))
+    role = presence.role_for(alias)
+    # Resolved here rather than left to spawn() so the success line can name the
+    # model that actually launched — the default is a decision comms made on the
+    # caller's behalf, and one it should say out loud.
+    model = args.model or ghostty.model_for_role(role)
+    ok = ghostty.spawn(alias, cwd, args.briefing, role=role, model=model)
     if not ok:
         print(f"falha ao abrir sessão {alias} — Ghostty pode não estar rodando, "
               f"ou a permissão de Automação (System Settings > Privacy & Security) não foi concedida")
         return 1
-    print(f"sessão {alias} aberta em {cwd}")
+    print(f"sessão {alias} aberta em {cwd} com {model or 'o modelo padrão'}")
     return 0
 
 def cmd_handoff(args) -> int:
@@ -220,6 +232,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("spawn"); sp.add_argument("alias")
     sp.add_argument("--cwd", default=None)
     sp.add_argument("--briefing", default="")
+    sp.add_argument("--model", default=None,
+                    help="modelo da sessão filha; sem isso, o papel decide "
+                         "(orquestrador opus[1m], builder sonnet[1m])")
     sp.set_defaults(fn=cmd_spawn)
 
     h = sub.add_parser("handoff")

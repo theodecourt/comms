@@ -243,6 +243,30 @@ that time on purpose: the new session has to record which tab is its own before
 focus moves away, or it records the spawning tab instead and two sessions end
 up claiming one terminal.
 
+### Which model the child comes up on
+
+**The role decides, and you do not have to say anything.** An orchestrator is
+spawned on `opus[1m]`, a builder on `sonnet[1m]`. That split is the point of
+the tree: planning, reviewing and holding the overview is what Opus is for, and
+writing code against a plan that already exists is not.
+
+`--model` overrides it when the task justifies the exception — a builder facing
+a genuinely hard design call, or a throwaway one:
+
+```
+comms spawn builder-back --cwd <repo> --model opus[1m] --briefing "..."
+```
+
+Take an alias (`opus`, `sonnet`, `haiku`, `fable`), optionally with `[1m]`, or a
+full model id. **Keep the `[1m]`**: without it the session gets a 200k window,
+and the context warning that tells a builder to hand off at 70% is calibrated in
+transcript bytes against a 1M window — it would fire long after auto-compact had
+already eaten the context it was warning about.
+
+A model comms does not recognise is refused rather than spawned, because Claude
+Code accepts an unknown name and comes up degraded: `sonet` would open a tab,
+report success, and leave you waiting on a builder that never works.
+
 ## Commands
 
 | Command | Purpose |
@@ -253,7 +277,7 @@ up claiming one terminal.
 | `comms inbox [--peek]` | read unread mail |
 | `comms log` | full history, including read messages |
 | `comms rename <alias>` | change your own alias; mail, history and grant follow |
-| `comms spawn <alias>` | open a new session |
+| `comms spawn <alias> [--model <m>]` | open a new session; the role picks the model unless you say |
 | `comms handoff "<state>"` | replace this session, keeping the alias |
 | `comms delegate <alias> "<scope>"` | human grants scoped approval authority |
 | `comms revoke <alias>` | withdraw it |

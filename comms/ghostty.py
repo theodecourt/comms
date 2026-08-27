@@ -98,7 +98,45 @@ def shell_quote(s: str) -> str:
     """Wrap for a POSIX shell single-quoted argument."""
     return "'" + s.replace("'", "'\\''") + "'"
 
-def _briefing_launch(briefing: str, name: str = None) -> str:
+# Which model a spawned session comes up on when the caller does not name one.
+# The role decides, because the roles do different work: an orchestrator plans,
+# reviews and holds the overview nobody else has — the thing worth spending Opus
+# on — while a builder writes code against a plan that already exists. Before
+# this, every child inherited `model` from ~/.claude/settings.json, so the whole
+# tree ran on the orchestrator's tier whatever it was doing.
+#
+# The `[1m]` suffix is load-bearing, not decoration. Without it a session gets a
+# 200k window, and the context-limit warning in hooks/comms-hook.py is expressed
+# in transcript BYTES calibrated against a 1M session (~11.2 MB per 100%). On a
+# 200k window that warning fires roughly 5x too late — which is to say never,
+# since auto-compact arrives first — and the builder loses the signal it is
+# supposed to hand off on. Dropping the suffix here means recalibrating there.
+DEFAULT_MODEL_BY_ROLE = {"orchestrator": "opus[1m]", "builder": "sonnet[1m]"}
+
+MODEL_ALIASES = ("fable", "opus", "sonnet", "haiku", "opusplan", "default")
+
+def valid_model(model: str) -> bool:
+    """Whether `model` is worth handing to `claude --model`.
+
+    Claude Code does not refuse a name it does not know: it warns, comes up
+    anyway and runs degraded ("There's an issue with the selected model" —
+    measured 2026-08-27 against `--model bogus-model-xyz`). So a typo like
+    `sonet` would open a tab, `comms spawn` would report the session as open,
+    and the orchestrator would wait on a builder that never works. Catching it
+    here is the difference between an error and a silent one.
+
+    The alias list will go stale when a new alias ships; the full-id branch is
+    the escape hatch for exactly that, and for Bedrock/Vertex style ids."""
+    if not model:
+        return False
+    base = model[:-4] if model.endswith("[1m]") else model
+    return base in MODEL_ALIASES or "claude" in base
+
+def model_for_role(role: str) -> str:
+    """Default model for `role`, or None for a role with no policy."""
+    return DEFAULT_MODEL_BY_ROLE.get(role)
+
+def _briefing_launch(briefing: str, name: str = None, model: str = None) -> str:
     """Write the briefing to a UTF-8 file and return a shell line that reads
     it, deletes it, and launches claude with it. The BRIEFING must not travel
     inline — Ghostty mangles non-ASCII in `initial input` — which is why it
@@ -109,13 +147,23 @@ def _briefing_launch(briefing: str, name: str = None) -> str:
     disagreed about what to call the same agent and no peer could address it by
     the name the board shows. `name` may carry the parent's project prefix, so
     it is not ASCII by construction the way a bare alias is — the shell quoting
-    is what makes that safe."""
+    is what makes that safe.
+
+    `--model` is quoted for a harder reason than tidiness: `[1m]` is a zsh glob,
+    and the launch line runs in the login shell. Unquoted, `claude --model
+    opus[1m]` never reaches claude at all — zsh fails the whole line with `no
+    matches found: opus[1m]` (measured 2026-08-27) and the tab opens on a bare
+    prompt with no session in it."""
     fd, path = tempfile.mkstemp(prefix="comms-brief-", suffix=".txt")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(briefing)
     q = shell_quote(path)
-    flag = f"-n {shell_quote(name)} " if name else ""
-    return f'B=$(cat {q}); rm -f {q}; claude {flag}"$B"'
+    flags = ""
+    if model:
+        flags += f"--model {shell_quote(model)} "
+    if name:
+        flags += f"-n {shell_quote(name)} "
+    return f'B=$(cat {q}); rm -f {q}; claude {flags}"$B"'
 
 def parent_naming() -> tuple:
     """(name, alias, role) of the session running this spawn.
@@ -252,10 +300,18 @@ def orchestrator_for_child() -> str:
         return mine
     return os.environ.get("COMMS_ORCH") or ""
 
-def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
+def spawn(alias: str, cwd: str, briefing: str, role: str = None,
+          model: str = None) -> bool:
     """Open a Ghostty session for `alias`. Returns True only when the spawn
     invocation itself succeeded — the caller (cmd_spawn) uses this to avoid
-    reporting a session as open when no tab was actually created."""
+    reporting a session as open when no tab was actually created.
+
+    `model` is what the child comes up on; omitted, the role decides (see
+    DEFAULT_MODEL_BY_ROLE). The caller chooses it — that is the point of the
+    feature: an orchestrator on Opus staffs its builders on Sonnet."""
+    from comms import presence
+    if not model:
+        model = model_for_role(role or presence.role_for(alias))
     rows = list_terminals()
     front = rows[0]["front_window"] if rows else None
     window = window_for_cwd(cwd, rows)
@@ -283,7 +339,8 @@ def spawn(alias: str, cwd: str, briefing: str, role: str = None) -> bool:
     # PROJETO-KB-api. A parent that was never named has no project to pass on,
     # and the child is just its alias.
     launch = _briefing_launch(briefing,
-                              native.session_name(alias, *parent_naming()))
+                              native.session_name(alias, *parent_naming()),
+                              model)
     before = set(native.sessions())
     ok, _ = _osascript(build_spawn_script(cwd, None, launch, env, window))
     # A spawn that already failed — Ghostty not running, Automation

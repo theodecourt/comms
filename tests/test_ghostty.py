@@ -245,7 +245,30 @@ class GhosttyScriptTest(unittest.TestCase):
         script = spawn_scripts[0]
         self.assertNotIn("command:", script)
         # the double quotes are AppleScript-escaped by the time they land here
-        self.assertIn('claude -n \'front\' \\"$B\\"', script)
+        self.assertIn('claude --model \'sonnet[1m]\' -n \'front\' \\"$B\\"', script)
+
+    def test_the_role_picks_the_model_when_the_caller_does_not(self):
+        # An orchestrator plans and reviews; a builder writes code against a
+        # plan that already exists. Before this, every child inherited the
+        # `model` in settings.json and the whole tree ran on one tier.
+        from comms import ghostty
+        lines = {}
+        for alias in ("front", "orch-front"):
+            scripts = []
+            with mock.patch.object(ghostty, "_osascript",
+                                   side_effect=lambda s: (scripts.append(s), (True, ""))[1]):
+                ghostty.spawn(alias, "/tmp", "leia o plano")
+            lines[alias] = [s for s in scripts if "with configuration" in s][0]
+        self.assertIn("--model 'sonnet[1m]'", lines["front"])
+        self.assertIn("--model 'opus[1m]'", lines["orch-front"])
+
+    def test_the_model_is_quoted_so_zsh_cannot_glob_the_1m_suffix(self):
+        # `[1m]` is a zsh glob. Unquoted, the login shell fails the whole launch
+        # line with `no matches found: opus[1m]` and claude never runs — the tab
+        # opens on a bare prompt and the board shows nothing.
+        from comms import ghostty
+        line = ghostty._briefing_launch("leia o plano", "front", "opus[1m]")
+        self.assertIn("claude --model 'opus[1m]' -n 'front' \"$B\"", line)
 
     def test_spawn_names_the_native_session_after_the_alias(self):
         # Without -n, Claude Code auto-names the session after its directory
