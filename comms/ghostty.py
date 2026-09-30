@@ -293,9 +293,13 @@ def orchestrator_for_child() -> str:
     anyone else passes down the one it was given.
 
     Empty when there is nothing to pass on, which is honest — a session with no
-    orchestrator should ask its human, not adopt whichever one it finds."""
+    orchestrator should ask its human, not adopt whichever one it finds.
+
+    The spawner's identity comes from whoami(), not from COMMS_ALIAS: an
+    orchestrator the user opened by hand and joined with "abre comms" never
+    had the variable set, and a renamed one carries its old name."""
     from comms import presence
-    mine = os.environ.get("COMMS_ALIAS") or ""
+    mine = presence.whoami() or ""
     if mine and presence.role_for(mine) == "orchestrator":
         return mine
     return os.environ.get("COMMS_ORCH") or ""
