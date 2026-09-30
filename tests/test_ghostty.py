@@ -57,7 +57,8 @@ class WaitForSessionTest(unittest.TestCase):
             os.getcwd(), set(), timeout=0.3, settle=0))
 
     def test_an_orchestrator_makes_itself_the_childs_orchestrator(self):
-        from comms import ghostty
+        from comms import ghostty, presence
+        presence.open("orch-back")
         os.environ["COMMS_ALIAS"] = "orch-back"
         os.environ.pop("COMMS_ORCH", None)
         try:
@@ -85,9 +86,20 @@ class WaitForSessionTest(unittest.TestCase):
             os.environ.pop(k, None)
         self.assertEqual(ghostty.orchestrator_for_child(), "")
 
+    def test_an_orchestrator_joined_by_hand_still_names_itself(self):
+        # Opened as a plain `claude` and joined with "abre comms": no
+        # COMMS_ALIAS in its environment, only its session id on the board.
+        from comms import ghostty, presence
+        os.environ.pop("COMMS_ALIAS", None)
+        os.environ.pop("COMMS_ORCH", None)
+        presence.open("orch-back", session="sess-orch")
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": "sess-orch"}):
+            self.assertEqual(ghostty.orchestrator_for_child(), "orch-back")
+
     def test_spawn_hands_the_child_its_orchestrator(self):
-        from comms import ghostty
+        from comms import ghostty, presence
         scripts = []
+        presence.open("orch-front")
         os.environ["COMMS_ALIAS"] = "orch-front"
         try:
             with mock.patch.object(ghostty, "list_terminals", return_value=[]), \
