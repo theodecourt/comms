@@ -60,3 +60,22 @@ class TasksTest(unittest.TestCase):
         row = [l for l in out.splitlines() if l.strip().startswith("01")][0]
         for word in ("done", "builder-back", "feat/funil", "abc123"):
             self.assertIn(word, row)
+
+    def test_close_archives_frees_and_marks_closed(self):
+        from comms import paths, tasks
+        task = self.new_task()
+        run("task", "assign", "builder-back", "funil-de-vendas", "--subtask", "01",
+            "--resumo", "endpoint")
+        run("task", "assign", "builder-front", "funil-de-vendas", "--subtask", "02")
+        code, out = run("task", "close", "funil-de-vendas")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(os.listdir(paths.assignments_dir()))
+        self.assertTrue(tasks.is_closed(task))
+        notes = os.listdir(os.environ["COMMS_VAULT"])
+        self.assertEqual(len(notes), 1)
+        note = open(os.path.join(os.environ["COMMS_VAULT"], notes[0])).read()
+        self.assertIn("01-endpoint.md", note)
+        self.assertIn("sem commit/push", out)
+        # a closed task takes no new assignment
+        code, _ = run("task", "assign", "x", "funil-de-vendas", "--subtask", "03")
+        self.assertEqual(code, 2)

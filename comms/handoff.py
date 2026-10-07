@@ -6,9 +6,15 @@ from comms import messages, presence
 def vault_root() -> str:
     """Where archive notes land. Overridable with COMMS_VAULT so tests never
     write into — or push to — the real Obsidian vault. Read at call time, for
-    the same reason paths.root() is."""
-    return os.environ.get("COMMS_VAULT") or os.path.expanduser(
-        "~/obsidian-segura/claude-code-session-history")
+    the same reason paths.root() is.
+
+    COMMS_ROOT drags it along, as it does paths.sessions_dir(): a test that
+    relocated the board and forgot COMMS_VAULT must not reach the real vault."""
+    if os.environ.get("COMMS_VAULT"):
+        return os.environ["COMMS_VAULT"]
+    if os.environ.get("COMMS_ROOT"):
+        return os.path.join(os.environ["COMMS_ROOT"], "vault")
+    return os.path.expanduser("~/obsidian-segura/claude-code-session-history")
 
 def doc_path(cwd: str, alias: str, stamp: str) -> str:
     """Never returns a path that already holds a file.
@@ -26,19 +32,22 @@ def doc_path(cwd: str, alias: str, stamp: str) -> str:
         n += 1
     return candidate
 
-def vault_path(alias: str, stamp: str, vault: str = None) -> str:
+def vault_path(alias: str, stamp: str, vault: str = None,
+               label: str = "Handoff") -> str:
     """Where the archive copy lands, avoiding same-day collisions the way
-    /archive-session does — a numbered suffix rather than an overwrite."""
+    /archive-session does — a numbered suffix rather than an overwrite.
+    `label` names the kind of note: `Handoff`, or `Task` for `comms task
+    close`, which archives through this same path."""
     base = vault or vault_root()
-    candidate = os.path.join(base, f"{stamp} Handoff {alias}.md")
+    candidate = os.path.join(base, f"{stamp} {label} {alias}.md")
     n = 2
     while os.path.exists(candidate):
-        candidate = os.path.join(base, f"{stamp} Handoff {alias} ({n}).md")
+        candidate = os.path.join(base, f"{stamp} {label} {alias} ({n}).md")
         n += 1
     return candidate
 
 def write_vault_note(path: str, alias: str, stamp: str, project: str,
-                     session_id: str, body: str) -> None:
+                     session_id: str, body: str, kind: str = "handoff") -> None:
     """Archive copy for the Obsidian vault, with the frontmatter the
     /archive-session notes use so both kinds of note query alike."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -47,12 +56,24 @@ def write_vault_note(path: str, alias: str, stamp: str, project: str,
         fh.write(f"date: {stamp}\n")
         fh.write(f"project: {project}\n")
         fh.write(f"session: {session_id}\n")
-        fh.write(f"tags: [claude-session, handoff, {project}]\n")
+        fh.write(f"tags: [claude-session, {kind}, {project}]\n")
         fh.write("---\n\n")
-        fh.write(f"# Handoff — {alias}\n\n")
+        fh.write(f"# {kind.capitalize()} — {alias}\n\n")
         fh.write(body.rstrip() + "\n")
 
-def publish_vault(path: str) -> bool:
+def archive(path: str, kind: str = "handoff") -> str:
+    """Publish a note already on disk and say what happened, in one line.
+
+    Pushes only for the real vault: with COMMS_VAULT or COMMS_ROOT set this is
+    a test or a sandbox, and the note stays local."""
+    if os.environ.get("COMMS_VAULT") or os.environ.get("COMMS_ROOT"):
+        return f"nota escrita em {path} (vault relocado — sem commit/push)"
+    if publish_vault(path, kind=kind):
+        return f"arquivado no vault: {os.path.basename(path)} (commitado e enviado)"
+    return (f"arquivado no vault: {os.path.basename(path)} "
+            f"(local — o commit/push falhou, verifique o repo do vault)")
+
+def publish_vault(path: str, kind: str = "handoff") -> bool:
     """Commit and push the archive note. The vault exists to be backed up off
     this machine, and `confirm-before-push` carves it out for exactly that.
     A failure here must not fail the handoff — the note is already on disk."""
@@ -61,7 +82,7 @@ def publish_vault(path: str) -> bool:
         subprocess.run(["git", "-C", repo, "add", path],
                        capture_output=True, timeout=30, check=True)
         subprocess.run(["git", "-C", repo, "commit", "-m",
-                        f"handoff: {os.path.basename(path)}"],
+                        f"{kind}: {os.path.basename(path)}"],
                        capture_output=True, timeout=30, check=True)
         subprocess.run(["git", "-C", repo, "push", "origin", "main"],
                        capture_output=True, timeout=90, check=True)
@@ -147,13 +168,7 @@ def run(alias: str, body: str, stamp: str, spawn_fn=None, summary: str = None) -
             + body)
         write_vault_note(vp, alias, stamp, os.path.basename(cwd),
                          entry.get("session", ""), archive_body)
-        if os.environ.get("COMMS_VAULT"):
-            print(f"nota escrita em {vp} (COMMS_VAULT definido — sem commit/push)")
-        elif publish_vault(vp):
-            print(f"arquivado no vault: {os.path.basename(vp)} (commitado e enviado)")
-        else:
-            print(f"arquivado no vault: {os.path.basename(vp)} "
-                  f"(local — o commit/push falhou, verifique o repo do vault)")
+        print(archive(vp))
     except OSError as e:
         print(f"nota do vault não foi escrita ({e}) — o handoff em si está feito")
     return path

@@ -267,3 +267,57 @@ def notice(alias: str):
     sub = subtask_file(task, sid)
     where = (f"{task_file(task)} e {sub}" if sub else task_file(task))
     return f"📋 {os.path.basename(task)} · subtarefa {sid} → leia {where}"
+
+
+def _body(path: str) -> str:
+    """A markdown file without its frontmatter."""
+    text = _read(path)
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            return text[end + 4:].lstrip("\n")
+    return text
+
+
+def close(ref: str, stamp: str = None) -> dict:
+    """Archive the task in the vault, free whoever held it, mark it closed.
+
+    The note goes first: if it cannot be written nothing else changes, and the
+    close can simply be run again. The push goes last and may fail on its own —
+    the note is on disk by then, as with a handoff."""
+    from comms import handoff
+    task = resolve(ref)
+    if is_closed(task):
+        raise TaskError(f"{os.path.basename(task)} já está fechada")
+    stamp = stamp or datetime.date.today().isoformat()
+    name = os.path.basename(task)
+
+    parts = [_body(task_file(task)).rstrip(), "", "## Subtarefas ao fechar", ""]
+    rows = status(task)
+    for r in rows:
+        parts.append(f"- **{r['id']}** {r['status']} · {r['owner'] or '—'} · "
+                     f"{r['branch'] or '—'} · {r['sha'] or '—'}")
+    for r in rows:
+        parts += ["", f"### {r['file']}", "",
+                  _body(os.path.join(task, "subtasks", r["file"])).rstrip()]
+    parts += ["", f"Pasta da task: `{task}`"]
+
+    vp = handoff.vault_path(name, stamp, label="Task")
+    try:
+        handoff.write_vault_note(vp, name, stamp, "tasks",
+                                 os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
+                                 "\n".join(parts), kind="task")
+    except OSError as e:
+        raise TaskError(f"nota do vault não foi escrita ({e}) — a task segue aberta")
+
+    freed = []
+    for alias, rec in assignments().items():
+        if rec.get("task") == task:
+            try:
+                os.unlink(paths.assignment_file(alias))
+                freed.append(alias)
+            except OSError:
+                pass
+    set_frontmatter(task_file(task), status="closed", closed=stamp)
+    return {"task": task, "note": vp, "freed": freed,
+            "archived": handoff.archive(vp, kind="task")}

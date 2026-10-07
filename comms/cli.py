@@ -268,6 +268,19 @@ def cmd_task_status(args) -> int:
         _print_task(task)
     return 0
 
+def cmd_task_close(args) -> int:
+    from comms import tasks
+    try:
+        rec = tasks.close(args.task)
+    except tasks.TaskError as e:
+        print(str(e))
+        return 2
+    print(f"{os.path.basename(rec['task'])} fechada")
+    if rec["freed"]:
+        print(f"atribuições apagadas: {', '.join(rec['freed'])}")
+    print(rec["archived"])
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="comms")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -330,6 +343,8 @@ def build_parser() -> argparse.ArgumentParser:
     ta.set_defaults(fn=cmd_task_assign)
     ts = t.add_parser("status"); ts.add_argument("task", nargs="?")
     ts.set_defaults(fn=cmd_task_status)
+    tc = t.add_parser("close"); tc.add_argument("task")
+    tc.set_defaults(fn=cmd_task_close)
 
     return p
 
