@@ -95,6 +95,15 @@ def main() -> int:
     status = STATUS_BY_EVENT.get(name)
     presence.touch(alias, status=status)
 
+    if name == "SessionStart":
+        # Once per session start rather than every turn: it re-reads the
+        # whole board, and ghosts only need clearing now and then. After the
+        # touch, so this session's own row can never look stale to it.
+        try:
+            presence.prune_ghosts()
+        except Exception:
+            pass
+
     if name in ("UserPromptSubmit", "SessionStart"):
         # Mail on the comms path — a broadcast, or a fallback from a failed
         # native send — used to be announced by the doorbell: a background

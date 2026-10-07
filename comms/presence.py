@@ -4,6 +4,12 @@ import os, re, time
 from comms import paths, store
 
 VALID_STATUSES = ("working", "idle", "waiting-human")
+
+# How long a row whose session is PROVEN gone stays on the board before it is
+# pruned. Long enough that an agent mid-`/clear` or a laptop that slept is
+# never caught; short enough that yesterday's dead tabs stop collecting
+# broadcasts.
+PRUNE_AFTER_SECONDS = 24 * 3600
 _ALIAS_RE = re.compile(r"^[a-z0-9-]+$")
 
 def valid_alias(alias: str) -> bool:
@@ -165,6 +171,30 @@ def rebind_session(session: str, entries: list, registry: dict, wanted: str = No
         return None
     rebind(candidate["alias"], session, registry.get(session))
     return candidate["alias"]
+
+def prune_ghosts(now: float = None) -> list:
+    """Remove rows whose session is proven gone and has been for a while.
+
+    Only `live is False` qualifies — None is "cannot tell" and never a reason
+    to evict. Inbox and log stay: a row is how the board finds an agent, the
+    mail and history belong to the alias and are what a successor reads.
+
+    Each row is re-read just before it goes, so a hook that rebound or touched
+    it in the meantime wins. Returns the aliases removed."""
+    now = time.time() if now is None else now
+    removed = []
+    for e in read_all():
+        if e.get("live") is not False:
+            continue
+        if now - e.get("last_seen", now) < PRUNE_AFTER_SECONDS:
+            continue
+        current = store.read_json(paths.presence_file(e["alias"]))
+        if current is None or current.get("session") != e.get("session") \
+                or current.get("last_seen") != e.get("last_seen"):
+            continue
+        close(e["alias"])
+        removed.append(e["alias"])
+    return removed
 
 def read_all(registry: dict = None) -> list:
     """Every board entry, enriched with whether its process is still there.

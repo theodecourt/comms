@@ -59,11 +59,15 @@ def _trunc(s: str, width: int) -> str:
 
 def cmd_who(args) -> int:
     from comms import delegation
+    pruned = presence.prune_ghosts()
     entries = presence.read_all()
     grants = delegation.read_all()
     if not entries and not grants:
         print("ninguém no board")
         return 0
+    if pruned:
+        print(f"removidos do board (sessão encerrada há mais de "
+              f"{presence.PRUNE_AFTER_SECONDS // 3600} h): {', '.join(pruned)}")
     # No bell column. It reported whether a `comms wait` was armed, which
     # mattered while the doorbell was how mail arrived. Native SendMessage
     # reaches a session with no background process, and comms-path mail now

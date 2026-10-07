@@ -204,6 +204,32 @@ class PresenceTest(unittest.TestCase):
         # registry readable but empty reads as unknown, never as dead
         self.assertTrue(all(e["reachable"] is None for e in presence.read_all()))
 
+    def test_prune_removes_only_long_dead_rows_and_keeps_their_mail(self):
+        from comms import messages, paths, presence, store
+        day = presence.PRUNE_AFTER_SECONDS
+        for alias in ("velho-morto", "novo-morto", "velho-incerto"):
+            presence.open(alias, session=f"s-{alias}")
+        presence.open("vivo", session="s-vivo")
+        self._registry({"sessionId": "s-vivo", "pid": os.getpid()})
+        # velho-incerto has no session the registry could ever list: unknown
+        e = store.read_json(paths.presence_file("velho-incerto"))
+        e["session"] = ""
+        store.write_json(paths.presence_file("velho-incerto"), e)
+        for alias in ("velho-morto", "velho-incerto"):
+            e = store.read_json(paths.presence_file(alias))
+            e["last_seen"] = time.time() - day - 60
+            store.write_json(paths.presence_file(alias), e)
+        os.environ["COMMS_ALIAS"] = "vivo"
+        messages.post("vivo", "oi", to="velho-morto")
+        with open(paths.log_file("velho-morto"), "a") as fh:
+            fh.write("{}\n")
+
+        self.assertEqual(presence.prune_ghosts(), ["velho-morto"])
+        left = {e["alias"] for e in presence.read_all()}
+        self.assertEqual(left, {"novo-morto", "velho-incerto", "vivo"})
+        self.assertTrue(os.listdir(paths.inbox_dir("velho-morto")))
+        self.assertTrue(os.path.exists(paths.log_file("velho-morto")))
+
     def test_a_registered_session_on_a_dead_pid_is_gone(self):
         from comms import presence
         presence.open("infra", session="sess-1")
