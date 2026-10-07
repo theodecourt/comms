@@ -203,6 +203,14 @@ def read_all(registry: dict = None) -> list:
             entry["live"] = False if (registry and session) else None
             entry["native_status"] = None
             entry["native_name"] = None
+        # What the 🔔 should say: on the board AND bound to a session that is
+        # there. Today that is exactly `live` — a row whose session matches a
+        # live registry record — but it is its own field because it is the
+        # contract a reader like agent-monitor consumes, and `live` is free to
+        # mean only "the process exists". Tri-state on purpose: None is
+        # "cannot tell", and a bell that went dark every time one registry
+        # file was mid-write would be a bell nobody believes.
+        entry["reachable"] = entry["live"]
         out.append(entry)
     return out
 

@@ -192,6 +192,18 @@ class PresenceTest(unittest.TestCase):
                         "status": "idle"})
         self.assertIs(presence.read_all()[0]["live"], False)
 
+    def test_reachable_is_tri_state(self):
+        from comms import presence
+        presence.open("vivo", session="s-vivo")
+        presence.open("morto", session="s-morto")
+        presence.open("sem-sessao", session="")
+        self._registry({"sessionId": "s-vivo", "pid": os.getpid()})
+        got = {e["alias"]: e["reachable"] for e in presence.read_all()}
+        self.assertEqual(got, {"vivo": True, "morto": False, "sem-sessao": None})
+        os.unlink(os.path.join(self.tmp, "sessions", "0.json"))
+        # registry readable but empty reads as unknown, never as dead
+        self.assertTrue(all(e["reachable"] is None for e in presence.read_all()))
+
     def test_a_registered_session_on_a_dead_pid_is_gone(self):
         from comms import presence
         presence.open("infra", session="sess-1")
