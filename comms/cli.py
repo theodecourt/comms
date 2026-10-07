@@ -61,6 +61,12 @@ def cmd_who(args) -> int:
     from comms import delegation
     pruned = presence.prune_ghosts()
     entries = presence.read_all()
+    if args.json:
+        # For readers that are not agents — agent-monitor paints the 🔔 from
+        # `reachable` — so they never have to parse the table.
+        import json
+        print(json.dumps(entries, ensure_ascii=False, indent=2))
+        return 0
     grants = delegation.read_all()
     if not entries and not grants:
         print("ninguém no board")
@@ -212,7 +218,8 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--note", default=""); o.add_argument("--role", default=None)
     o.set_defaults(fn=cmd_open)
 
-    sub.add_parser("who").set_defaults(fn=cmd_who)
+    w = sub.add_parser("who"); w.add_argument("--json", action="store_true")
+    w.set_defaults(fn=cmd_who)
 
     po = sub.add_parser("post"); po.add_argument("body")
     po.add_argument("--to", default=None); po.add_argument("--urgent", action="store_true")
