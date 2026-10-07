@@ -189,3 +189,91 @@ class HookTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RebindTest(unittest.TestCase):
+    """`/clear` and `/resume` keep the process and change the session id
+    (measured 2026-10-07). The row has to survive the SessionEnd that comes
+    with it and follow the agent to its new id."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.environ["COMMS_ROOT"] = self.tmp
+        self.sessions = os.path.join(self.tmp, "sessions")
+        os.makedirs(self.sessions)
+
+    def tearDown(self):
+        for k in ("COMMS_ROOT", "COMMS_ALIAS", "CLAUDE_CODE_SESSION_ID"):
+            os.environ.pop(k, None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def registry(self, session, pid=None, started=1000):
+        """One live Claude process, currently on `session` — as /clear leaves
+        it: the same <pid>.json rewritten in place with the new id."""
+        pid = pid or os.getpid()
+        with open(os.path.join(self.sessions, f"{pid}.json"), "w") as fh:
+            json.dump({"pid": pid, "sessionId": session, "startedAt": started}, fh)
+
+    def fire(self, event, session, alias=None, **extra):
+        env = dict(os.environ, COMMS_ROOT=self.tmp)
+        env.pop("COMMS_ALIAS", None)
+        if alias:
+            env["COMMS_ALIAS"] = alias
+        payload = json.dumps({"session_id": session, "hook_event_name": event,
+                              "cwd": "/tmp", "transcript_path": "", **extra})
+        r = subprocess.run([sys.executable, HOOK], input=payload,
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
+
+    def row(self, alias):
+        from comms import paths, store
+        return store.read_json(paths.presence_file(alias))
+
+    def test_clear_keeps_the_row_and_the_next_turn_rebinds_it(self):
+        from comms import presence
+        self.registry("old")
+        presence.open("builder-back", session="old")
+        self.fire("SessionEnd", "old", alias="builder-back", reason="clear")
+        self.assertIsNotNone(self.row("builder-back"))
+        self.registry("new")
+        self.fire("UserPromptSubmit", "new", alias="builder-back")
+        self.assertEqual(self.row("builder-back")["session"], "new")
+
+    def test_a_real_exit_still_leaves_the_board(self):
+        from comms import presence
+        presence.open("builder-back", session="old")
+        self.fire("SessionEnd", "old", reason="prompt_input_exit")
+        self.assertIsNone(self.row("builder-back"))
+
+    def test_a_session_joined_by_hand_is_rebound_by_its_process(self):
+        from comms import presence
+        self.registry("old")
+        presence.open("orch", session="old")
+        self.registry("new")             # same pid, same startedAt
+        self.fire("UserPromptSubmit", "new")
+        self.assertEqual(self.row("orch")["session"], "new")
+
+    def test_a_recycled_pid_does_not_inherit_the_row(self):
+        from comms import presence
+        self.registry("old", started=1000)
+        presence.open("orch", session="old")
+        self.registry("stranger", started=2000)
+        self.fire("UserPromptSubmit", "stranger")
+        self.assertEqual(self.row("orch")["session"], "old")
+
+    def test_a_live_owner_keeps_its_row(self):
+        from comms import presence
+        self.registry("owner")
+        presence.open("builder-back", session="owner")
+        self.fire("UserPromptSubmit", "intruder", alias="builder-back")
+        self.assertEqual(self.row("builder-back")["session"], "owner")
+
+    def test_malformed_payloads_exit_zero(self):
+        env = dict(os.environ, COMMS_ROOT=self.tmp, COMMS_ALIAS="x")
+        for raw in ('[]', '"str"', '{"session_id": 7, "hook_event_name": "Stop"}',
+                    '{"session_id": "s", "hook_event_name": ["Stop"]}',
+                    '{"session_id": "s", "hook_event_name": "SessionEnd", "reason": {}}'):
+            r = subprocess.run([sys.executable, HOOK], input=raw,
+                               capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, raw)

@@ -71,17 +71,32 @@ def role_for(alias: str) -> str:
     return "orchestrator" if alias == "orch" or alias.startswith("orch-") \
         else "builder"
 
+def _process_of(session: str) -> dict:
+    """The Claude process behind `session`, as the registry knows it.
+
+    `pid` alone would be a weak key: macOS recycles pids, and a stranger that
+    inherited a dead agent's pid would inherit its row too. `startedAt` is the
+    process start, which the registry keeps across `/clear` (measured
+    2026-10-07) — so the pair names one process for its whole life."""
+    if not session:
+        return {"pid": None, "proc_started": None}
+    from comms import native
+    record = native.sessions().get(session) or {}
+    return {"pid": record.get("pid"), "proc_started": record.get("startedAt")}
+
 def open(alias, note="", role=None, session=None, cwd=None, terminal=None) -> dict:
     store.ensure_dirs(alias)
+    session = session or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     entry = {
         "alias": alias,
         "role": role or role_for(alias),
         "note": note,
         "cwd": cwd or os.getcwd(),
-        "session": session or os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
+        "session": session,
         "terminal": terminal or "",
         "status": "idle",
         "last_seen": time.time(),
+        **_process_of(session),
     }
     store.write_json(paths.presence_file(alias), entry)
     return entry
@@ -103,7 +118,55 @@ def close(alias: str) -> None:
     except OSError:
         pass
 
-def read_all() -> list:
+def rebind(alias: str, session: str, record: dict = None) -> None:
+    """Point an existing row at a new session id, keeping everything else."""
+    entry = store.read_json(paths.presence_file(alias))
+    if entry is None:
+        return
+    entry["session"] = session
+    if record:
+        entry["pid"] = record.get("pid")
+        entry["proc_started"] = record.get("startedAt")
+    entry["last_seen"] = time.time()
+    store.write_json(paths.presence_file(alias), entry)
+
+def rebind_session(session: str, entries: list, registry: dict, wanted: str = None):
+    """Re-attach a session whose id no row knows, or return None.
+
+    `/clear` and `/resume` give the SAME process a new session id (measured
+    2026-10-07), and a row keyed on the old one goes deaf: no touch, no ✉. Two
+    ways back to the row, in order:
+
+    - `COMMS_ALIAS`, which a spawned session carries for its whole life;
+    - the process itself — same `pid` and `startedAt` in the registry — which
+      is all a session that joined by hand has.
+
+    Only a row whose own session is known to be gone (`live is False`), or
+    that never had one, is taken. A live owner must keep its row: two sessions
+    sharing one COMMS_ALIAS would otherwise steal it from each other on every
+    turn. `live is None` is not proof either — the registry reads as unknown
+    whenever one of its files is mid-write — so that turn passes and the next
+    event tries again."""
+    by_alias = {e["alias"]: e for e in entries}
+    candidate = None
+    if wanted and wanted in by_alias:
+        candidate = by_alias[wanted]
+    else:
+        record = registry.get(session) or {}
+        pid, started = record.get("pid"), record.get("startedAt")
+        if pid is not None and started is not None:
+            same = [e for e in entries
+                    if e.get("pid") == pid and e.get("proc_started") == started]
+            if len(same) == 1:
+                candidate = same[0]
+    if candidate is None:
+        return None
+    if candidate.get("session") and candidate.get("live") is not False:
+        return None
+    rebind(candidate["alias"], session, registry.get(session))
+    return candidate["alias"]
+
+def read_all(registry: dict = None) -> list:
     """Every board entry, enriched with whether its process is still there.
 
     `live` comes from Claude Code's own session registry, not from a heartbeat
@@ -119,7 +182,8 @@ def read_all() -> list:
     except OSError:
         return out
     from comms import native
-    registry = native.sessions()
+    if registry is None:
+        registry = native.sessions()
     for name in names:
         if not name.endswith(".json"):
             continue

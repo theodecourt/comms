@@ -9,6 +9,9 @@ STATUS_BY_EVENT = {
     "Notification": "waiting-human",
 }
 
+# SessionEnd reasons after which the same process carries on under a new id.
+KEEP_ROW_ON_END = ("clear", "resume")
+
 # Byte thresholds on the transcript, a proxy for context usage. Calibrate
 # against real sessions — compaction and tool results distort the ratio.
 # Transcript size as a proxy for context usage, because the model cannot read
@@ -42,13 +45,24 @@ def main() -> int:
     if not name or not session:
         return 0
 
-    from comms import presence
+    from comms import native, presence
 
+    registry = native.sessions()
+    entries = presence.read_all(registry=registry)
     alias = None
-    for entry in presence.read_all():
+    for entry in entries:
         if entry.get("session") == session:
             alias = entry["alias"]
             break
+
+    if alias is None and name != "SessionEnd":
+        # An id no row knows may still be one of ours: `/clear` and `/resume`
+        # keep the process and change the id. Every event tries, not only
+        # SessionStart, because the first one to arrive after the switch is
+        # usually UserPromptSubmit. SessionEnd never rebinds — re-attaching a
+        # row only to close it would evict whoever the row was waiting for.
+        alias = presence.rebind_session(session, entries, registry,
+                                        wanted=os.environ.get("COMMS_ALIAS"))
 
     if alias is None and name == "SessionStart":
         # A spawned session carries its alias in COMMS_ALIAS, so it can join
@@ -69,7 +83,13 @@ def main() -> int:
         return 0        # session never joined the board
 
     if name == "SessionEnd":
-        presence.close(alias)
+        # `/clear` and `/resume` end the session id, not the process: the same
+        # agent comes back on a new id one event later, and the row has to
+        # still be there for it to rebind to. Only a real exit leaves the
+        # board. A row whose process then dies anyway is a ghost, and ghosts
+        # are pruned.
+        if event.get("reason") not in KEEP_ROW_ON_END:
+            presence.close(alias)
         return 0
 
     status = STATUS_BY_EVENT.get(name)
