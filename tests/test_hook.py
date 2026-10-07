@@ -277,3 +277,50 @@ class RebindTest(unittest.TestCase):
             r = subprocess.run([sys.executable, HOOK], input=raw,
                                capture_output=True, text=True, env=env)
             self.assertEqual(r.returncode, 0, raw)
+
+
+class AssignmentNoticeTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.environ["COMMS_ROOT"] = self.tmp
+        os.environ["COMMS_TASKS_DIR"] = os.path.join(self.tmp, "tasks")
+        from comms import presence, tasks
+        presence.open("builder-back", session="sess-1")
+        self.task = tasks.new("Funil", today="2026-10-07")
+        tasks.assign("builder-back", self.task, "01", resumo="endpoint")
+
+    def tearDown(self):
+        for k in ("COMMS_ROOT", "COMMS_TASKS_DIR", "COMMS_ALIAS",
+                  "CLAUDE_CODE_SESSION_ID"):
+            os.environ.pop(k, None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def fire(self, event, session="sess-1", alias=None, **extra):
+        env = dict(os.environ)
+        env.pop("COMMS_ALIAS", None)
+        if alias:
+            env["COMMS_ALIAS"] = alias
+        payload = json.dumps({"session_id": session, "hook_event_name": event,
+                              "cwd": "/tmp", "transcript_path": "", **extra})
+        r = subprocess.run([sys.executable, HOOK], input=payload,
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def test_the_holder_is_told_every_turn(self):
+        out = self.fire("UserPromptSubmit")
+        self.assertIn("📋 2026-10-07-funil · subtarefa 01", out)
+        self.assertIn("01-endpoint.md", out)
+        self.assertNotIn("📋", self.fire("Stop"))
+
+    def test_the_assignment_outlives_session_end(self):
+        from comms import presence
+        self.fire("SessionEnd")
+        self.assertEqual(presence.read_all(), [])
+        out = self.fire("UserPromptSubmit", session="sess-new", alias="builder-back")
+        self.assertIn("📋", out)
+
+    def test_a_closed_task_says_nothing(self):
+        from comms import tasks
+        tasks.set_frontmatter(tasks.task_file(self.task), status="closed")
+        self.assertNotIn("📋", self.fire("UserPromptSubmit"))

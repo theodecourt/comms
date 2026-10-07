@@ -29,6 +29,19 @@ WARN_BYTES = {
     "builder": int(BYTES_PER_PERCENT * 70),        # ~7.8 MB
 }
 
+def print_assignment(alias) -> None:
+    """The 📋 line, if `alias` holds a subtask. Isolated so that nothing on the
+    task side — a vault folder gone, a TASK.md half-edited by hand — can cost
+    the session its ✉ line or its presence touch."""
+    try:
+        from comms import presence, tasks
+        if presence.valid_alias(alias or ""):
+            line = tasks.notice(alias)
+            if line:
+                print(line)
+    except Exception:
+        pass
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -80,7 +93,12 @@ def main() -> int:
                 alias = wanted
 
     if alias is None:
-        return 0        # session never joined the board
+        # Never joined the board — but a spawned agent holds its task before
+        # its first `comms open`, and the assignment is keyed by alias, so the
+        # line can already reach it.
+        if name in ("UserPromptSubmit", "SessionStart"):
+            print_assignment(os.environ.get("COMMS_ALIAS"))
+        return 0
 
     if name == "SessionEnd":
         # `/clear` and `/resume` end the session id, not the process: the same
@@ -103,6 +121,12 @@ def main() -> int:
             presence.prune_ghosts()
         except Exception:
             pass
+
+    if name in ("UserPromptSubmit", "SessionStart"):
+        # Reprinted every turn, like ✉ and for the same reason: only these two
+        # events reach the model's context, and a line that is printed again
+        # each turn survives compaction.
+        print_assignment(alias)
 
     if name in ("UserPromptSubmit", "SessionStart"):
         # Mail on the comms path — a broadcast, or a fallback from a failed
