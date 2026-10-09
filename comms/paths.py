@@ -51,3 +51,29 @@ def delegation_dir() -> str:
 
 def delegation_file(alias: str) -> str:
     return os.path.join(delegation_dir(), f"{alias}.json")
+
+def assignments_dir() -> str:
+    """Kept apart from presence on purpose: SessionEnd deletes the presence
+    row, and an assignment has to outlive the session that received it."""
+    return os.path.join(root(), "assignments")
+
+def assignment_file(alias: str) -> str:
+    return os.path.join(assignments_dir(), f"{alias}.json")
+
+def tasks_root() -> str:
+    """One folder per task, in the Obsidian vault so a human reads them where
+    the rest of the notes are.
+
+    COMMS_ROOT drags this with it, as it does sessions_dir(): a test that set
+    up a fake board and forgot COMMS_TASKS_DIR must land in its tmpdir, never
+    in the real vault — which is a git repo that gets pushed."""
+    explicit = os.environ.get("COMMS_TASKS_DIR")
+    if explicit:
+        return explicit
+    if os.environ.get("COMMS_ROOT"):
+        return os.path.join(os.environ["COMMS_ROOT"], "tasks")
+    return os.path.expanduser("~/obsidian-segura/tasks")
+
+def templates_dir() -> str:
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "templates")

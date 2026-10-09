@@ -48,6 +48,27 @@ There is no doorbell to arm. Mail on the comms path waits for your next turn
 instead of interrupting it — which is correct, because anything that cannot wait
 comes natively and wakes you on its own.
 
+## Your task
+
+A line like this at the start of a turn means you hold a subtask:
+
+`📋 2026-10-07-funil · subtarefa 01 → leia …/TASK.md e …/subtasks/01-endpoint.md`
+
+It is reprinted every turn, so it survives compaction, a handoff and `/clear`.
+Read `TASK.md` first — the goal, the acceptance criteria, what the other
+subtasks are — then your subtask file. **Write only in your subtask file**;
+`TASK.md` is the orchestrator's, and two agents editing one markdown file
+overwrite each other. Keep its frontmatter current (`status: todo | doing |
+blocked | done`). When you finish, set `status: done` with `branch` and `sha`,
+and tell your orchestrator.
+
+**Orchestrator:** `comms task new "<nome>"` creates the folder and `TASK.md`;
+fill in the goal and criteria. `comms task assign <alias> <task> --subtask 01
+--resumo "..."` hands a subtask to an alias — before or after spawning it — and
+creates its file. `comms task status` reads the subtask files, which are the
+truth; rewrite your table from it. `comms task close <task>` archives it in the
+vault and frees everyone on it.
+
 ## Roles
 
 **An alias is the role plus the half of the product it works on**: `orch-back`,
@@ -147,6 +168,8 @@ send you never followed up on shows in `comms log` as `⚠ NÃO ENTREGUE`.
 - **ESTADO `foi-embora`** — the session is gone. Nothing reaches it, natively or
   otherwise. Take it to `theo` or to your orchestrator.
 - **ESTADO** otherwise is what the agent last reported it was doing.
+- A row gone for more than 24 h is removed by `comms who`. Its inbox and log
+  stay, and an alias that comes back finds its mail.
 - **NOME NATIVO** is not a state — it is how you address the row. See Sending,
   above. A name too long for the column is cut in the middle, so both ends stay
   recognisable.
@@ -281,6 +304,11 @@ report success, and leave you waiting on a builder that never works.
 | `comms handoff "<state>"` | replace this session, keeping the alias |
 | `comms delegate <alias> "<scope>"` | human grants scoped approval authority |
 | `comms revoke <alias>` | withdraw it |
+| `comms who --json` | the board as JSON, with `reachable` per row |
+| `comms task new "<nome>"` | orchestrator: create a task folder and `TASK.md` |
+| `comms task assign <alias> <task> --subtask <id> [--resumo "..."]` | orchestrator: hand a subtask to an alias |
+| `comms task status [<task>]` | subtasks with state, owner, branch and sha |
+| `comms task close <task>` | orchestrator: archive in the vault, free the owners |
 | `comms close` | leave the board |
 
 Never pass `--from`: the sender is derived from your session.

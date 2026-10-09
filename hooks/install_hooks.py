@@ -6,7 +6,9 @@ SETTINGS = os.environ.get("COMMS_SETTINGS") or os.path.expanduser("~/.claude/set
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.path.join(HERE, "comms-hook.py")
 SEND_HOOK = os.path.join(HERE, "comms-sendmessage-hook.py")
-EVENTS = ["UserPromptSubmit", "Stop", "Notification", "SessionEnd"]
+# SessionStart: auto-join of spawned sessions, ghost pruning, and the 📋 line
+# on the very first turn.
+EVENTS = ["SessionStart", "UserPromptSubmit", "Stop", "Notification", "SessionEnd"]
 # PostToolUse precisa de matcher: sem ele o hook rodaria em toda ferramenta.
 MATCHED = [("PostToolUse", "SendMessage", SEND_HOOK)]
 

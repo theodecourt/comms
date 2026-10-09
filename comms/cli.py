@@ -59,11 +59,21 @@ def _trunc(s: str, width: int) -> str:
 
 def cmd_who(args) -> int:
     from comms import delegation
+    pruned = presence.prune_ghosts()
     entries = presence.read_all()
+    if args.json:
+        # For readers that are not agents — agent-monitor paints the 🔔 from
+        # `reachable` — so they never have to parse the table.
+        import json
+        print(json.dumps(entries, ensure_ascii=False, indent=2))
+        return 0
     grants = delegation.read_all()
     if not entries and not grants:
         print("ninguém no board")
         return 0
+    if pruned:
+        print(f"removidos do board (sessão encerrada há mais de "
+              f"{presence.PRUNE_AFTER_SECONDS // 3600} h): {', '.join(pruned)}")
     # No bell column. It reported whether a `comms wait` was armed, which
     # mattered while the doorbell was how mail arrived. Native SendMessage
     # reaches a session with no background process, and comms-path mail now
@@ -200,6 +210,77 @@ def cmd_revoke(args) -> int:
     print(f"{args.alias} não tinha delegação")
     return 0
 
+def cmd_task_new(args) -> int:
+    from comms import tasks
+    try:
+        task = tasks.new(args.nome)
+    except tasks.TaskError as e:
+        print(str(e))
+        return 2
+    print(f"task criada em {task}")
+    print(f"preencha objetivo e critérios em {tasks.task_file(task)}")
+    return 0
+
+def cmd_task_assign(args) -> int:
+    from comms import tasks
+    try:
+        rec = tasks.assign(args.alias, args.task, args.subtask, resumo=args.resumo)
+    except tasks.TaskError as e:
+        print(str(e))
+        return 2
+    prev = rec["previous"]
+    if prev and (prev.get("task"), prev.get("subtask")) != (rec["task"], rec["subtask"]):
+        print(f"{args.alias} deixa {os.path.basename(str(prev.get('task')))} "
+              f"· subtarefa {prev.get('subtask')}")
+    print(f"{args.alias} → {os.path.basename(rec['task'])} · subtarefa "
+          f"{rec['subtask']} ({rec['file']})")
+    return 0
+
+def _print_task(task: str) -> None:
+    from comms import tasks
+    state = "fechada" if tasks.is_closed(task) else "aberta"
+    print(f"{os.path.basename(task)} ({state})")
+    rows = tasks.status(task)
+    if not rows:
+        print("  sem subtarefas")
+        return
+    print(f"  {'ID':<5} {'ESTADO':<8} {'DONO':<16} {'BRANCH':<32} {'SHA':<10} ARQUIVO")
+    for r in rows:
+        print(f"  {r['id']:<5} {r['status']:<8} {r['owner'] or '—':<16} "
+              f"{r['branch'] or '—':<32} {r['sha'][:10] or '—':<10} {r['file']}")
+
+def cmd_task_status(args) -> int:
+    from comms import tasks
+    if args.task:
+        try:
+            targets = [tasks.resolve(args.task)]
+        except tasks.TaskError as e:
+            print(str(e))
+            return 2
+    else:
+        targets = [t for t in tasks.all_tasks() if not tasks.is_closed(t)]
+        if not targets:
+            print("nenhuma task aberta")
+            return 0
+    for i, task in enumerate(targets):
+        if i:
+            print()
+        _print_task(task)
+    return 0
+
+def cmd_task_close(args) -> int:
+    from comms import tasks
+    try:
+        rec = tasks.close(args.task)
+    except tasks.TaskError as e:
+        print(str(e))
+        return 2
+    print(f"{os.path.basename(rec['task'])} fechada")
+    if rec["freed"]:
+        print(f"atribuições apagadas: {', '.join(rec['freed'])}")
+    print(rec["archived"])
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="comms")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -208,7 +289,8 @@ def build_parser() -> argparse.ArgumentParser:
     o.add_argument("--note", default=""); o.add_argument("--role", default=None)
     o.set_defaults(fn=cmd_open)
 
-    sub.add_parser("who").set_defaults(fn=cmd_who)
+    w = sub.add_parser("who"); w.add_argument("--json", action="store_true")
+    w.set_defaults(fn=cmd_who)
 
     po = sub.add_parser("post"); po.add_argument("body")
     po.add_argument("--to", default=None); po.add_argument("--urgent", action="store_true")
@@ -250,6 +332,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     rv = sub.add_parser("revoke"); rv.add_argument("alias")
     rv.set_defaults(fn=cmd_revoke)
+
+    t = sub.add_parser("task").add_subparsers(dest="task_cmd", required=True)
+    tn = t.add_parser("new"); tn.add_argument("nome")
+    tn.set_defaults(fn=cmd_task_new)
+    ta = t.add_parser("assign"); ta.add_argument("alias"); ta.add_argument("task")
+    ta.add_argument("--subtask", required=True)
+    ta.add_argument("--resumo", default=None,
+                    help="o que a subtarefa entrega; nomeia o arquivo dela")
+    ta.set_defaults(fn=cmd_task_assign)
+    ts = t.add_parser("status"); ts.add_argument("task", nargs="?")
+    ts.set_defaults(fn=cmd_task_status)
+    tc = t.add_parser("close"); tc.add_argument("task")
+    tc.set_defaults(fn=cmd_task_close)
 
     return p
 

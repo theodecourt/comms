@@ -9,6 +9,9 @@ STATUS_BY_EVENT = {
     "Notification": "waiting-human",
 }
 
+# SessionEnd reasons after which the same process carries on under a new id.
+KEEP_ROW_ON_END = ("clear", "resume")
+
 # Byte thresholds on the transcript, a proxy for context usage. Calibrate
 # against real sessions — compaction and tool results distort the ratio.
 # Transcript size as a proxy for context usage, because the model cannot read
@@ -26,6 +29,19 @@ WARN_BYTES = {
     "builder": int(BYTES_PER_PERCENT * 70),        # ~7.8 MB
 }
 
+def print_assignment(alias) -> None:
+    """The 📋 line, if `alias` holds a subtask. Isolated so that nothing on the
+    task side — a vault folder gone, a TASK.md half-edited by hand — can cost
+    the session its ✉ line or its presence touch."""
+    try:
+        from comms import presence, tasks
+        if presence.valid_alias(alias or ""):
+            line = tasks.notice(alias)
+            if line:
+                print(line)
+    except Exception:
+        pass
+
 def main() -> int:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -42,13 +58,24 @@ def main() -> int:
     if not name or not session:
         return 0
 
-    from comms import presence
+    from comms import native, presence
 
+    registry = native.sessions()
+    entries = presence.read_all(registry=registry)
     alias = None
-    for entry in presence.read_all():
+    for entry in entries:
         if entry.get("session") == session:
             alias = entry["alias"]
             break
+
+    if alias is None and name != "SessionEnd":
+        # An id no row knows may still be one of ours: `/clear` and `/resume`
+        # keep the process and change the id. Every event tries, not only
+        # SessionStart, because the first one to arrive after the switch is
+        # usually UserPromptSubmit. SessionEnd never rebinds — re-attaching a
+        # row only to close it would evict whoever the row was waiting for.
+        alias = presence.rebind_session(session, entries, registry,
+                                        wanted=os.environ.get("COMMS_ALIAS"))
 
     if alias is None and name == "SessionStart":
         # A spawned session carries its alias in COMMS_ALIAS, so it can join
@@ -66,14 +93,40 @@ def main() -> int:
                 alias = wanted
 
     if alias is None:
-        return 0        # session never joined the board
+        # Never joined the board — but a spawned agent holds its task before
+        # its first `comms open`, and the assignment is keyed by alias, so the
+        # line can already reach it.
+        if name in ("UserPromptSubmit", "SessionStart"):
+            print_assignment(os.environ.get("COMMS_ALIAS"))
+        return 0
 
     if name == "SessionEnd":
-        presence.close(alias)
+        # `/clear` and `/resume` end the session id, not the process: the same
+        # agent comes back on a new id one event later, and the row has to
+        # still be there for it to rebind to. Only a real exit leaves the
+        # board. A row whose process then dies anyway is a ghost, and ghosts
+        # are pruned.
+        if event.get("reason") not in KEEP_ROW_ON_END:
+            presence.close(alias)
         return 0
 
     status = STATUS_BY_EVENT.get(name)
     presence.touch(alias, status=status)
+
+    if name == "SessionStart":
+        # Once per session start rather than every turn: it re-reads the
+        # whole board, and ghosts only need clearing now and then. After the
+        # touch, so this session's own row can never look stale to it.
+        try:
+            presence.prune_ghosts()
+        except Exception:
+            pass
+
+    if name in ("UserPromptSubmit", "SessionStart"):
+        # Reprinted every turn, like ✉ and for the same reason: only these two
+        # events reach the model's context, and a line that is printed again
+        # each turn survives compaction.
+        print_assignment(alias)
 
     if name in ("UserPromptSubmit", "SessionStart"):
         # Mail on the comms path — a broadcast, or a fallback from a failed

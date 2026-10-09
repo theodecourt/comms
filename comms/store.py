@@ -11,11 +11,14 @@ def ensure_dirs(alias: str) -> None:
     _mkdir(os.path.dirname(paths.log_file(alias)))
 
 def write_json(path: str, obj: dict) -> None:
+    write_text(path, json.dumps(obj, indent=2))
+
+def write_text(path: str, text: str) -> None:
     _mkdir(os.path.dirname(path))
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
     try:
-        with os.fdopen(fd, "w") as fh:
-            json.dump(obj, fh, indent=2)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
         os.replace(tmp, path)          # atomic within one filesystem
     except BaseException:
         try:

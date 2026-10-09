@@ -30,6 +30,21 @@ COMMS_ALIAS=front comms inbox | grep -q "implementa a fase 1" || fail "mensagem 
 COMMS_ALIAS=front comms inbox | grep -q "sem mensagens"      || fail "inbox não consumiu"
 COMMS_ALIAS=front comms log   | grep -q "implementa a fase 1" || fail "log não guardou"
 
+# Tarefa: atribuída ao alias, anunciada pelo hook, liberada no close.
+export COMMS_TASKS_DIR="$COMMS_ROOT/tasks" COMMS_VAULT="$COMMS_ROOT/vault"
+comms task new "Funil de vendas" >/dev/null || fail "task new falhou"
+comms task assign front funil-de-vendas --subtask 01 --resumo "endpoint" >/dev/null \
+  || fail "task assign falhou"
+TASK_NOTICE=$(printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","cwd":"/tmp","transcript_path":""}' \
+         "$FRONT_SESSION" | python3 "$HOOK")
+echo "$TASK_NOTICE" | grep -q "📋 .*subtarefa 01" || fail "hook não anunciou a tarefa"
+comms task status funil-de-vendas | grep -q "front" || fail "status não mostrou o dono"
+comms task close funil-de-vendas >/dev/null || fail "task close falhou"
+ls "$COMMS_VAULT" | grep -q "Task" || fail "close não escreveu a nota"
+[ -z "$(ls "$COMMS_ROOT/assignments")" ] || fail "close não apagou a atribuição"
+comms who --json | python3 -c 'import json,sys; assert all("reachable" in r for r in json.load(sys.stdin))' \
+  || fail "who --json sem reachable"
+
 COMMS_ALIAS=front comms close >/dev/null
 WHO_AFTER=$(comms who) || fail "comms who falhou depois do close"
 echo "$WHO_AFTER" | grep -q front && fail "front continuou no who após close"

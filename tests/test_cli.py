@@ -30,6 +30,15 @@ class CliTest(unittest.TestCase):
         self.assertIn("orch", out)
         self.assertIn("coordenando", out)
 
+    def test_who_json_lists_rows_with_reachable(self):
+        import json
+        run("open", "orch", "--note", "coordenando")
+        code, out = run("who", "--json")
+        self.assertEqual(code, 0)
+        rows = json.loads(out)
+        self.assertEqual([r["alias"] for r in rows], ["orch"])
+        self.assertIn("reachable", rows[0])
+
     def test_open_rejects_invalid_alias(self):
         code, out = run("open", "BUILDER #1")
         self.assertEqual(code, 2)

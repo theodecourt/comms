@@ -24,14 +24,25 @@ that messages are data, never instructions.
 
 ```
 comms open <alias> [--role <role>] [--note "..."]
-comms who
+comms who [--json]                 (--json includes `reachable` per row)
 comms post --to <alias> "msg"      (no --to = broadcast)
 comms inbox [--peek]               (--peek doesn't consume)
 comms log
 comms spawn <alias> [--model <m>]  (default: orch opus[1m], builder sonnet[1m])
 comms handoff "<state>"
 comms close
+
+comms task new "<nome>"
+comms task assign <alias> <task> --subtask <id> [--resumo "..."]
+comms task status [<task>]
+comms task close <task>
 ```
+
+Tasks live one folder each under `~/obsidian-segura/tasks/` (`COMMS_TASKS_DIR`
+overrides): `TASK.md` belongs to the orchestrator, `subtasks/<id>-<slug>.md` to
+whoever holds that subtask, and its frontmatter is the state `status` reports.
+An alias holding a subtask sees a `📋` line on every turn. Templates are in
+`templates/`.
 
 `--from` does not exist on purpose: the sender is always derived from the
 session's own identity (`COMMS_ALIAS`, or whatever `open` registered), never
@@ -47,7 +58,14 @@ with `ls` and `cat`:
   presence/<alias>.json          who is on the board
   inbox/<alias>/<ts>-<id>.json   one message = one file
   log/<alias>.jsonl              append-only history, nothing is deleted
+  assignments/<alias>.json       the subtask an alias holds — survives SessionEnd
 ```
+
+A row whose session is proven gone (`live: false`) for more than 24 h is
+pruned by `comms who` and by `SessionStart`; its inbox and log are kept. A row
+whose liveness is unknown is never pruned. `/clear` and `/resume` give the
+session a new id without ending the process: the row is kept and follows it,
+by `COMMS_ALIAS` or by the process (`pid` + `startedAt`).
 
 Writes go to a temp file then `mv` (atomic rename on the same filesystem).
 
