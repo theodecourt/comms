@@ -241,6 +241,78 @@ def is_trusted_dir(cwd: str) -> bool:
         return True     # cannot tell — do not block the spawn on a guess
     return os.path.realpath(cwd) in {os.path.realpath(k) for k in projects}
 
+def _main_checkout(cwd: str):
+    """The main checkout behind a linked git worktree, or None when `cwd` is
+    not one. A worktree's `.git` is a file, so `--git-common-dir` points into
+    the main repo's `.git` while `--show-toplevel` stays inside the worktree."""
+    try:
+        out = subprocess.run(["git", "-C", cwd, "rev-parse", "--path-format=absolute",
+                              "--show-toplevel", "--git-common-dir"],
+                             capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    lines = out.stdout.split()
+    if out.returncode != 0 or len(lines) != 2:
+        return None
+    toplevel, common = (os.path.realpath(p) for p in lines)
+    main = os.path.dirname(common)
+    if os.path.basename(common) != ".git" or main == toplevel:
+        return None
+    return main
+
+def trust_worktree(cwd: str, config: str = None) -> bool:
+    """Carry the trust you already gave a repo over to its worktrees.
+
+    Claude Code walks up to parent folders looking for an accepted trust
+    dialog, but stops at the git root — and a worktree is its own git root, so
+    `.claude/worktrees/x` inside a trusted repo still prompts. Measured on
+    2.1.296, 2026-10-13. Every fresh worktree has a new path, so without this
+    every spawn into one is refused. Only a worktree whose main checkout
+    already has hasTrustDialogAccepted qualifies: it holds that same repo's
+    code, so nothing is approved that you have not approved yourself.
+
+    ~/.claude.json is rewritten constantly by live sessions, so the write is
+    atomic and is abandoned if the file changed under us. Returns whether the
+    entry was written; the caller re-checks rather than trusting this."""
+    main = _main_checkout(cwd)
+    if main is None:
+        return False
+    config = config or os.path.expanduser("~/.claude.json")
+    key = os.path.realpath(cwd)
+    for _ in range(3):
+        try:
+            before = os.stat(config).st_mtime_ns
+            with open(config, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            return False
+        projects = data.setdefault("projects", {})
+        trusted = {os.path.realpath(k) for k, v in projects.items()
+                   if isinstance(v, dict) and v.get("hasTrustDialogAccepted")}
+        if main not in trusted:
+            return False
+        projects[key] = {**projects.get(key, {}), "hasTrustDialogAccepted": True}
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(config), prefix=".claude.json.")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2, ensure_ascii=False)
+            os.chmod(tmp, os.stat(config).st_mode & 0o777)
+            if os.stat(config).st_mtime_ns != before:
+                continue        # a session saved meanwhile — re-read, never clobber it
+            os.replace(tmp, config)
+            return True
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+    return False
+
+def ensure_trusted(cwd: str) -> bool:
+    """is_trusted_dir, after first carrying trust over to a worktree."""
+    if is_trusted_dir(cwd):
+        return True
+    trust_worktree(cwd)
+    return is_trusted_dir(cwd)
+
 def wait_for_session(cwd: str, before: set, timeout: float = 30.0,
                      settle: float = 2.0) -> bool:
     """Hold the new tab in focus until its SessionStart hook has run.

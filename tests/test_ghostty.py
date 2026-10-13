@@ -1,6 +1,7 @@
 # tests/test_ghostty.py — script generation only; no AppleScript is executed
-import os, shutil, tempfile, unittest
+import json, os, shutil, tempfile, unittest
 from unittest import mock
+from comms import ghostty
 
 class WaitForSessionTest(unittest.TestCase):
     """Focus must stay on the spawned tab until its SessionStart hook ran."""
@@ -382,3 +383,42 @@ class GhosttyScriptTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrustWorktreeTest(unittest.TestCase):
+    """A worktree is its own git root, so Claude Code does not inherit the main
+    repo's trust into it — comms carries it over, but only from a trusted repo."""
+
+    def setUp(self):
+        import shutil, subprocess, tempfile
+        self.root = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.repo = os.path.join(self.root, "repo")
+        self.wt = os.path.join(self.repo, ".claude", "worktrees", "x")
+        git = lambda *a: subprocess.run(["git", *a], check=True, capture_output=True)
+        git("init", "-q", self.repo)
+        git("-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@t",
+            "commit", "-q", "--allow-empty", "-m", "init")
+        git("-C", self.repo, "worktree", "add", "-q", self.wt)
+        self.config = os.path.join(self.root, "claude.json")
+
+    def _write(self, projects):
+        with open(self.config, "w") as fh:
+            json.dump({"numStartups": 7, "projects": projects}, fh)
+
+    def _read(self):
+        with open(self.config) as fh:
+            return json.load(fh)
+
+    def test_worktree_of_a_trusted_repo_is_trusted(self):
+        self._write({self.repo: {"hasTrustDialogAccepted": True}})
+        self.assertTrue(ghostty.trust_worktree(self.wt, config=self.config))
+        data = self._read()
+        self.assertTrue(data["projects"][self.wt]["hasTrustDialogAccepted"])
+        self.assertEqual(data["numStartups"], 7)   # the rest of the file survives
+
+    def test_untrusted_repo_or_plain_dir_is_left_alone(self):
+        self._write({self.repo: {"hasTrustDialogAccepted": False}})
+        self.assertFalse(ghostty.trust_worktree(self.wt, config=self.config))
+        self.assertFalse(ghostty.trust_worktree(self.repo, config=self.config))
+        self.assertNotIn(self.wt, self._read()["projects"])

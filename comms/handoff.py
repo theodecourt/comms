@@ -120,7 +120,7 @@ def run(alias: str, body: str, stamp: str, spawn_fn=None, summary: str = None) -
     # handoff would have already closed the only live session on this alias.
     if spawn_fn is None:
         from comms import ghostty
-        if not ghostty.is_trusted_dir(cwd):
+        if not ghostty.ensure_trusted(cwd):
             print(f"{cwd} nunca foi aberto no Claude Code — a sessão sucessora "
                   f"travaria no diálogo de confiança e você perderia {alias}. "
                   f"Abra o diretório uma vez manualmente e tente de novo.")
