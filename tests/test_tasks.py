@@ -27,6 +27,22 @@ class TasksTest(unittest.TestCase):
         from comms import tasks
         return tasks.new("Funil de vendas", today="2026-10-07")
 
+    def test_new_records_the_repo_of_cwd_or_the_given_ones(self):
+        import subprocess
+        from comms import tasks
+        repo = os.path.realpath(os.path.join(self.tmp, "segura-api"))
+        subprocess.run(["git", "init", "-q", repo], check=True)
+        old = os.getcwd()
+        os.chdir(repo)
+        try:
+            task = tasks.new("Funil", today="2026-10-07")
+        finally:
+            os.chdir(old)
+        self.assertEqual(tasks.frontmatter(tasks.task_file(task))["repo"], repo)
+        self.assertIn("**Repo:** `segura-api`", open(tasks.task_file(task)).read())
+        task = tasks.new("Outra", today="2026-10-07", repos=[repo, "/x/front"])
+        self.assertIn("**Repo:** `segura-api`, `front`", open(tasks.task_file(task)).read())
+
     def test_without_tasks_dir_a_relocated_board_never_reaches_the_vault(self):
         from comms import paths
         os.environ.pop("COMMS_TASKS_DIR")

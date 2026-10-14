@@ -11,7 +11,7 @@ of truth for progress; the table in TASK.md is the orchestrator's view of it.
 Who holds what lives in `assignments/<alias>.json`, outside presence, so it
 survives SessionEnd, a handoff and a `/clear` — keyed by alias, not session.
 """
-import datetime, os, re, time, unicodedata
+import datetime, os, re, subprocess, time, unicodedata
 from comms import paths, presence, store
 
 STATUSES = ("todo", "doing", "blocked", "done")
@@ -87,7 +87,24 @@ def is_closed(task: str) -> bool:
     return frontmatter(task_file(task)).get("status") == "closed"
 
 
-def new(name: str, today: str = None) -> str:
+def repo_root(path: str):
+    """The repo `path` sits in, or None. A worktree resolves to its main
+    checkout: the task belongs to the repo, not to one branch of it."""
+    from comms import ghostty
+    try:
+        out = subprocess.run(["git", "-C", path, "rev-parse", "--path-format=absolute",
+                              "--show-toplevel"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    top = os.path.realpath(out.stdout.strip())
+    return ghostty._main_checkout(top) or top
+
+
+def new(name: str, today: str = None, repos: list = None) -> str:
+    """`repos` defaults to the repo of the current directory; an empty result
+    still creates the task, with `—` for the orchestrator to fill in."""
     slug = slugify(name)
     if not slug:
         raise TaskError(f"nome sem letras ou dígitos: {name!r}")
@@ -95,8 +112,15 @@ def new(name: str, today: str = None) -> str:
     task = os.path.join(paths.tasks_root(), f"{today}-{slug}")
     if os.path.exists(task):
         raise TaskError(f"já existe uma task em {task}")
+    if repos is None:
+        here = repo_root(os.getcwd())
+        repos = [here] if here else []
+    repos = [repo_root(r) or os.path.abspath(r) for r in repos]
     os.makedirs(os.path.join(task, "subtasks"))
-    store.write_text(task_file(task), _template("TASK.md", nome=name, data=today))
+    store.write_text(task_file(task), _template(
+        "TASK.md", nome=name, data=today,
+        repo=", ".join(repos) or "—",
+        repo_nomes=", ".join(f"`{os.path.basename(r)}`" for r in repos) or "—"))
     return task
 
 

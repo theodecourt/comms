@@ -62,8 +62,11 @@ overwrite each other. Keep its frontmatter current (`status: todo | doing |
 blocked | done`). When you finish, set `status: done` with `branch` and `sha`,
 and tell your orchestrator.
 
-**Orchestrator:** `comms task new "<nome>"` creates the folder and `TASK.md`;
-fill in the goal and criteria. `comms task assign <alias> <task> --subtask 01
+**Orchestrator:** `comms task new "<nome>"` creates the folder and `TASK.md`,
+recording the repo you are in (a worktree counts as its main checkout) under
+the title and in the frontmatter. Run it from that repo, or pass `--repo
+<caminho>` — repeat it for a task spanning back and front. Then fill in the
+goal and criteria. `comms task assign <alias> <task> --subtask 01
 --resumo "..."` hands a subtask to an alias — before or after spawning it — and
 creates its file. `comms task status` reads the subtask files, which are the
 truth; rewrite your table from it. `comms task close <task>` archives it in the
@@ -305,7 +308,7 @@ report success, and leave you waiting on a builder that never works.
 | `comms delegate <alias> "<scope>"` | human grants scoped approval authority |
 | `comms revoke <alias>` | withdraw it |
 | `comms who --json` | the board as JSON, with `reachable` per row |
-| `comms task new "<nome>"` | orchestrator: create a task folder and `TASK.md` |
+| `comms task new "<nome>" [--repo <caminho>]` | orchestrator: create a task folder and `TASK.md`, recording its repo |
 | `comms task assign <alias> <task> --subtask <id> [--resumo "..."]` | orchestrator: hand a subtask to an alias |
 | `comms task status [<task>]` | subtasks with state, owner, branch and sha |
 | `comms task close <task>` | orchestrator: archive in the vault, free the owners |
