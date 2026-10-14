@@ -213,11 +213,16 @@ def cmd_revoke(args) -> int:
 def cmd_task_new(args) -> int:
     from comms import tasks
     try:
-        task = tasks.new(args.nome)
+        task = tasks.new(args.nome, repos=args.repo or None)
     except tasks.TaskError as e:
         print(str(e))
         return 2
     print(f"task criada em {task}")
+    repo = tasks.frontmatter(tasks.task_file(task)).get("repo")
+    if repo == "—":
+        print("aviso: fora de um repo git e sem --repo — preencha o repo no TASK.md")
+    else:
+        print(f"repo: {repo}")
     print(f"preencha objetivo e critérios em {tasks.task_file(task)}")
     return 0
 
@@ -335,6 +340,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     t = sub.add_parser("task").add_subparsers(dest="task_cmd", required=True)
     tn = t.add_parser("new"); tn.add_argument("nome")
+    tn.add_argument("--repo", action="append",
+                    help="repo da task; repita para mais de um (padrão: o do diretório atual)")
     tn.set_defaults(fn=cmd_task_new)
     ta = t.add_parser("assign"); ta.add_argument("alias"); ta.add_argument("task")
     ta.add_argument("--subtask", required=True)
